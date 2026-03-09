@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lesson Plan",
+  "type": "object",
+  "required": ["lesson"],
+  "additionalProperties": false,
+  "properties": {
+    "lesson": {
+      "type": "object",
+      "required": [
+        "id","title","unit","lessonType","level","ageGroup","durationMinutes","theme","mainAim",
+        "subsidiaryAims","prerequisiteKnowledge","assumptions","materials","languageFocus","writingTask",
+        "stages","assessment","homework","metadata"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "unit": {"type": "string"},
+        "lessonType": {"type": "string"},
+        "level": {"type": "string"},
+        "ageGroup": {"type": "string"},
+        "durationMinutes": {"type": "number"},
+        "theme": {"type": "string"},
+        "mainAim": {"type": "string"},
+        "subsidiaryAims": {"type": "array", "items": {"type": "string"}},
+        "prerequisiteKnowledge": {"type": "array", "items": {"type": "string"}},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+        "materials": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id","type","title","source","notes"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {"type": "string"},
+              "type": {"type": "string"},
+              "title": {"type": "string"},
+              "source": {"type": "string"},
+              "notes": {"type": "string"}
+            }
+          }
+        },
+        "languageFocus": {
+          "type": "object",
+          "required": ["targetLanguage","functions","forms","pronunciation","punctuation"],
+          "additionalProperties": false,
+          "properties": {
+            "targetLanguage": {"type": "string"},
+            "functions": {"type": "array", "items": {"type": "string"}},
+            "forms": {"type": "array", "items": {"type": "string"}},
+            "pronunciation": {"type": "array", "items": {"type": "string"}},
+            "punctuation": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "writingTask": {
+          "type": "object",
+          "required": ["genre","audience","prompt","wordCount","successCriteria"],
+          "additionalProperties": false,
+          "properties": {
+            "genre": {"type": "string"},
+            "audience": {"type": "string"},
+            "prompt": {"type": "string"},
+            "wordCount": {
+              "type": "object",
+              "required": ["min","max"],
+              "additionalProperties": false,
+              "properties": {
+                "min": {"type": "number"},
+                "max": {"type": "number"}
+              }
+            },
+            "successCriteria": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id","order","name","stageType","durationMinutes","aim","interaction","procedure","instructions","content","answers","teacherNotes","anticipatedProblems","boardPlan","timingNotes"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {"type": "string"},
+              "order": {"type": "number"},
+              "name": {"type": "string"},
+              "stageType": {"type": "string"},
+              "durationMinutes": {"type": "number"},
+              "aim": {"type": "string"},
+              "interaction": {"type": "string"},
+              "procedure": {"type": "array", "items": {"type": "string"}},
+              "instructions": {"type": "array", "items": {"type": "string"}},
+              "content": {
+                "type": "object",
+                "required": ["text","questions","items","prompts","examples"],
+                "additionalProperties": false,
+                "properties": {
+                  "text": {"type": "string"},
+                  "questions": {"type": "array", "items": {"type": ["string","object"]}},
+                  "items": {"type": "array", "items": {"type": ["string","object"]}},
+                  "prompts": {"type": "array", "items": {"type": ["string","object"]}},
+                  "examples": {"type": "array", "items": {"type": ["string","object"]}}
+                }
+              },
+              "answers": {
+                "type": "object",
+                "required": ["type","items"],
+                "additionalProperties": false,
+                "properties": {
+                  "type": {"type": "string"},
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["questionId","answer","alternatives","notes"],
+                      "additionalProperties": false,
+                      "properties": {
+                        "questionId": {"type": "string"},
+                        "answer": {"type": "string"},
+                        "alternatives": {"type": "array", "items": {"type": "string"}},
+                        "notes": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              },
+              "teacherNotes": {"type": "array", "items": {"type": "string"}},
+              "anticipatedProblems": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["problem","solution"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "problem": {"type": "string"},
+                    "solution": {"type": "string"}
+                  }
+                }
+              },
+              "boardPlan": {"type": "array", "items": {"type": ["string","object"]}},
+              "timingNotes": {"type": "array", "items": {"type": "string"}}
+            }
+          }
+        },
+        "assessment": {
+          "type": "object",
+          "required": ["criteria","peerChecklist","teacherFeedbackFocus"],
+          "additionalProperties": false,
+          "properties": {
+            "criteria": {"type": "array", "items": {"type": "string"}},
+            "peerChecklist": {"type": "array", "items": {"type": "string"}},
+            "teacherFeedbackFocus": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "homework": {
+          "type": "object",
+          "required": ["assigned","task","instructions"],
+          "additionalProperties": false,
+          "properties": {
+            "assigned": {"type": "boolean"},
+            "task": {"type": "string"},
+            "instructions": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "required": ["author","createdAt","updatedAt","version"],
+          "additionalProperties": false,
+          "properties": {
+            "author": {"type": "string"},
+            "createdAt": {"type": "string"},
+            "updatedAt": {"type": "string"},
+            "version": {"type": "string"}
+          }
+        }
+      }
+    }
+  }
+}
