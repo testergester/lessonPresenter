@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson Presenter</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="panel">
+      <h1>Lesson Presenter</h1>
+      <label for="lessonJson">Lesson JSON</label>
+      <textarea id="lessonJson" spellcheck="false"></textarea>
+      <button id="loadLessonBtn">Load Lesson</button>
+
+      <div class="controls">
+        <h2>Presentation</h2>
+        <button id="prevBtn">Previous Page</button>
+        <button id="nextBtn">Next Page</button>
+        <button id="revealAnswerBtn">Reveal Next Answer</button>
+      </div>
+
+      <div class="controls">
+        <h2>Annotator</h2>
+        <label>Pen Color</label>
+        <div class="color-swatches" id="colorSwatches"></div>
+
+        <label for="penSize">Pen Size</label>
+        <input id="penSize" type="range" min="2" max="20" value="4" />
+        <span id="penSizeValue">4 px</span>
+
+        <button id="toggleAnnotatorBtn">Enable Annotator</button>
+        <button id="clearPageAnnotationBtn">Clear Current Page Annotation</button>
+      </div>
+
+      <div class="controls">
+        <h2>Export</h2>
+        <button id="exportPdfBtn">Export Final Lesson as PDF</button>
+      </div>
+    </aside>
+
+    <main>
+      <div id="status"></div>
+      <section id="stage" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>
