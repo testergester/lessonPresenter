@@ -23,25 +23,55 @@ let revealedAnswerCountByPage = [];
 let pageCanvases = [];
 
 const sampleLesson = {
-  title: 'Math Warm-up',
-  pages: [
-    {
-      title: 'Page 1: Arithmetic',
-      content: 'Solve each problem mentally before revealing answers.',
-      questions: [
-        { prompt: '12 + 15 = ?', answer: '27' },
-        { prompt: '9 × 6 = ?', answer: '54' }
-      ]
-    },
-    {
-      title: 'Page 2: Fractions',
-      content: 'Simplify each fraction.',
-      questions: [
-        { prompt: '8/12', answer: '2/3' },
-        { prompt: '15/25', answer: '3/5' }
-      ]
-    }
-  ]
+  lesson: {
+    id: 'sample-1',
+    title: 'Math Warm-up',
+    unit: 'Mental Math',
+    stages: [
+      {
+        id: 'stage-1',
+        order: 1,
+        name: 'Arithmetic',
+        stageType: 'practice',
+        durationMinutes: 10,
+        content: {
+          text: 'Solve each problem mentally before revealing answers.',
+          questions: ['12 + 15 = ?', '9 × 6 = ?'],
+          items: [],
+          prompts: ['Try without writing first.'],
+          examples: []
+        },
+        answers: {
+          type: 'direct',
+          items: [
+            { questionId: 'q1', answer: '27', alternatives: [], notes: '' },
+            { questionId: 'q2', answer: '54', alternatives: [], notes: '' }
+          ]
+        }
+      },
+      {
+        id: 'stage-2',
+        order: 2,
+        name: 'Fractions',
+        stageType: 'guided',
+        durationMinutes: 10,
+        content: {
+          text: 'Simplify each fraction.',
+          questions: ['8/12', '15/25'],
+          items: [],
+          prompts: [],
+          examples: ['6/9 → 2/3']
+        },
+        answers: {
+          type: 'direct',
+          items: [
+            { questionId: 'q1', answer: '2/3', alternatives: [], notes: '' },
+            { questionId: 'q2', answer: '3/5', alternatives: [], notes: '' }
+          ]
+        }
+      }
+    ]
+  }
 };
 
 lessonJsonInput.value = JSON.stringify(sampleLesson, null, 2);
@@ -66,17 +96,100 @@ function createColorSwatches() {
   });
 }
 
+function normalizeQuestionEntry(question) {
+  if (typeof question === 'string') return { prompt: question, answer: '' };
+  if (question && typeof question === 'object') {
+    return {
+      prompt: question.prompt || question.question || JSON.stringify(question),
+      answer: question.answer || ''
+    };
+  }
+  return { prompt: String(question), answer: '' };
+}
+
+function resolveLessonRoot(source) {
+  if (!source || typeof source !== 'object') {
+    throw new Error('Invalid schema: expected a JSON object containing lesson stages.');
+  }
+
+  if (source.lesson && typeof source.lesson === 'object') {
+    return source.lesson;
+  }
+
+  if (Array.isArray(source.stages)) {
+    return source;
+  }
+
+  throw new Error('Invalid schema: expected either { lesson: { stages: [] } } or { stages: [] }.');
+}
+
+function lessonSchemaToPresenterSchema(source) {
+  const lessonMeta = resolveLessonRoot(source);
+  if (!Array.isArray(lessonMeta.stages)) {
+    throw new Error('Invalid schema: lesson.stages must be an array.');
+  }
+
+  const stages = [...lessonMeta.stages].sort((a, b) => (a.order || 0) - (b.order || 0));
+
+  const pages = stages.map((stage, index) => {
+    const content = stage.content || {};
+    const prompts = Array.isArray(content.prompts) ? content.prompts : [];
+    const examples = Array.isArray(content.examples) ? content.examples : [];
+    const items = Array.isArray(content.items) ? content.items : [];
+
+    const supplementalLines = [
+      content.text || '',
+      prompts.length ? `Prompts: ${prompts.join(' • ')}` : '',
+      examples.length ? `Examples: ${examples.join(' • ')}` : '',
+      items.length ? `Items: ${items.map((i) => (typeof i === 'string' ? i : JSON.stringify(i))).join(' • ')}` : ''
+    ].filter(Boolean);
+
+    const questions = Array.isArray(content.questions)
+      ? content.questions.map(normalizeQuestionEntry)
+      : [];
+
+    const answerItems = Array.isArray(stage.answers?.items) ? stage.answers.items : [];
+    const answersByIndex = answerItems.map((item) => {
+      if (!item) return '';
+      const alternatives = Array.isArray(item.alternatives) && item.alternatives.length
+        ? ` (alts: ${item.alternatives.join(', ')})`
+        : '';
+      const notes = item.notes ? ` — ${item.notes}` : '';
+      return `${item.answer || ''}${alternatives}${notes}`.trim();
+    });
+
+    if (!questions.length && answersByIndex.length) {
+      answersByIndex.forEach((ans, answerIndex) => {
+        questions.push({ prompt: `Item ${answerIndex + 1}`, answer: ans });
+      });
+    } else {
+      questions.forEach((q, qIndex) => {
+        q.answer = q.answer || answersByIndex[qIndex] || '';
+      });
+    }
+
+    return {
+      title: `${index + 1}. ${stage.name || stage.stageType || `Stage ${index + 1}`}`,
+      content: supplementalLines.join('\n\n'),
+      questions
+    };
+  });
+
+  return {
+    title: lessonMeta.title || 'Untitled Lesson',
+    pages
+  };
+}
+
 function parseLesson(jsonText) {
   const parsed = JSON.parse(jsonText);
-  if (!parsed || !Array.isArray(parsed.pages)) {
-    throw new Error('Invalid schema: expected { title, pages: [] }.');
-  }
-  parsed.pages.forEach((page, i) => {
+  const converted = lessonSchemaToPresenterSchema(parsed);
+  converted.pages.forEach((page, i) => {
     if (!Array.isArray(page.questions)) {
       throw new Error(`Invalid page at index ${i}: questions must be an array.`);
     }
   });
-  return parsed;
+  return converted;
 }
 
 function setStatus(message) {
@@ -135,6 +248,42 @@ function attachDrawingEvents(canvas) {
   });
 }
 
+function getCurrentPageElement() {
+  return stage.querySelector(`.page[data-page-index="${currentPageIndex}"]`);
+}
+
+function pasteImageIntoCurrentPage(file) {
+  const page = getCurrentPageElement();
+  if (!page) return;
+  const imageArea = page.querySelector('.pasted-images');
+  if (!imageArea) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = document.createElement('img');
+    img.src = reader.result;
+    img.alt = 'Pasted lesson visual';
+    img.className = 'pasted-image';
+    imageArea.appendChild(img);
+    setStatus('Image pasted into current page.');
+  };
+  reader.readAsDataURL(file);
+}
+
+function onPaste(event) {
+  const activeTag = document.activeElement?.tagName;
+  if (activeTag === 'TEXTAREA' || activeTag === 'INPUT') return;
+
+  const clipboardItems = event.clipboardData?.items || [];
+  const imageItem = [...clipboardItems].find((item) => item.type.startsWith('image/'));
+  if (!imageItem) return;
+
+  const imageFile = imageItem.getAsFile();
+  if (!imageFile) return;
+  event.preventDefault();
+  pasteImageIntoCurrentPage(imageFile);
+}
+
 function buildPages() {
   stage.innerHTML = '';
   pageCanvases = [];
@@ -149,9 +298,17 @@ function buildPages() {
     title.textContent = page.title || `Page ${pageIndex + 1}`;
 
     const content = document.createElement('p');
+    content.className = 'page-content';
     content.textContent = page.content || '';
 
-    pageEl.append(title, content);
+    const pasteHint = document.createElement('p');
+    pasteHint.className = 'paste-hint';
+    pasteHint.textContent = 'Tip: click the page and press Ctrl/Cmd + V to paste an image onto this page.';
+
+    const pastedImages = document.createElement('div');
+    pastedImages.className = 'pasted-images';
+
+    pageEl.append(title, content, pasteHint, pastedImages);
 
     page.questions.forEach((q, questionIndex) => {
       const qEl = document.createElement('div');
@@ -162,7 +319,7 @@ function buildPages() {
 
       const answer = document.createElement('div');
       answer.className = 'answer hidden';
-      answer.textContent = `Answer: ${q.answer}`;
+      answer.textContent = `Answer: ${q.answer || '—'}`;
 
       qEl.append(prompt, answer);
       pageEl.appendChild(qEl);
@@ -178,7 +335,7 @@ function buildPages() {
     pageCanvases.push(canvas);
   });
 
-  window.addEventListener('resize', () => pageCanvases.forEach(resizeCanvasToParent));
+  window.addEventListener('resize', () => pageCanvases.forEach(resizeCanvasToParent), { once: true });
 }
 
 function showPage(index) {
@@ -196,7 +353,7 @@ function showPage(index) {
 }
 
 function revealNextAnswer() {
-  const activePage = stage.querySelector(`.page[data-page-index="${currentPageIndex}"]`);
+  const activePage = getCurrentPageElement();
   if (!activePage) return;
 
   const answers = [...activePage.querySelectorAll('.answer')];
@@ -224,7 +381,7 @@ loadLessonBtn.addEventListener('click', () => {
   try {
     const parsed = parseLesson(lessonJsonInput.value);
     if (!parsed.pages.length) {
-      setStatus('Lesson must include at least one page.');
+      setStatus('Lesson must include at least one stage/page.');
       return;
     }
     initLesson(parsed);
@@ -290,5 +447,10 @@ exportPdfBtn.addEventListener('click', () => {
   }, 50);
 });
 
+stage.addEventListener('click', () => {
+  stage.focus();
+});
+document.addEventListener('paste', onPaste);
+
 createColorSwatches();
-initLesson(sampleLesson);
+initLesson(lessonSchemaToPresenterSchema(sampleLesson));
