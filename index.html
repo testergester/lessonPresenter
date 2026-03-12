@@ -7,6 +7,10 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <div id="offlineBanner" class="offline-banner" hidden>
+    Offline mode: using cached app + last saved lesson state.
+  </div>
+
   <div class="app-shell">
     <aside class="panel">
       <h1>Lesson Presenter</h1>
@@ -19,6 +23,18 @@
         <button id="prevBtn">Previous Page</button>
         <button id="nextBtn">Next Page</button>
         <button id="revealAnswerBtn">Reveal Next Answer</button>
+        <label for="stageJump">Jump to stage</label>
+        <select id="stageJump"></select>
+      </div>
+
+      <div class="controls">
+        <h2>Timer</h2>
+        <div class="timer-readout" id="timerReadout">00:00</div>
+        <label for="timerMinutes">Minutes</label>
+        <input id="timerMinutes" type="number" min="1" max="180" value="5" />
+        <button id="startTimerBtn">Start / Restart</button>
+        <button id="pauseTimerBtn">Pause</button>
+        <button id="resetTimerBtn">Reset</button>
       </div>
 
       <div class="controls">
@@ -38,19 +54,42 @@
 
       <div class="controls">
         <h2>View Mode</h2>
-        <button id="presenterViewBtn">Presenter View</button>
+        <button id="presenterViewBtn">Teacher View</button>
         <button id="audienceViewBtn">Audience View</button>
+        <button id="boardModeBtn">Board Mode</button>
+        <button id="tabletModeBtn">Tablet Mode</button>
+      </div>
+
+      <div class="controls">
+        <h2>Live Participation</h2>
+        <label for="pollQuestion">Poll question</label>
+        <input id="pollQuestion" type="text" placeholder="Type a quick poll" />
+        <button id="launchPollBtn">Launch Poll</button>
+        <label for="exitTicketPrompt">Exit ticket prompt</label>
+        <input id="exitTicketPrompt" type="text" placeholder="One thing you learned..." />
+        <button id="showExitTicketBtn">Show Exit Ticket</button>
+        <button id="coldCallBtn">Cold-call Student</button>
+        <button id="toggleMiniWhiteboardBtn">Toggle Mini Whiteboards</button>
       </div>
 
       <div class="controls">
         <h2>Export</h2>
-        <button id="exportPdfBtn">Export Final Lesson as PDF</button>
+        <label><input id="includeAnnotationsPrint" type="checkbox" checked /> Include annotations in print</label>
+        <label><input id="includeHiddenAnswersPrint" type="checkbox" checked /> Reveal all answers in print</label>
+        <button id="exportPdfBtn">Print / Export PDF</button>
       </div>
     </aside>
 
     <main>
       <div id="status"></div>
-      <section id="stage" aria-live="polite" tabindex="0"></section>
+      <section id="teacherStage" aria-live="polite" tabindex="0"></section>
+      <section id="audienceStage" aria-live="polite"></section>
+      <section id="participationHub" class="participation-hub" hidden>
+        <h3>Live Participation</h3>
+        <div id="pollCard" class="tool-card" hidden></div>
+        <div id="exitTicketCard" class="tool-card" hidden></div>
+        <div id="coldCallCard" class="tool-card" hidden></div>
+      </section>
     </main>
   </div>
 

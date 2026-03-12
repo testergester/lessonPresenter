@@ -12,6 +12,13 @@ body {
   margin: 0;
 }
 
+.offline-banner {
+  background: #fff4ce;
+  border-bottom: 1px solid #f2d28b;
+  padding: 0.5rem 1rem;
+  font-weight: 700;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 340px 1fr;
@@ -31,8 +38,13 @@ label {
   font-weight: bold;
 }
 
-textarea {
+textarea,
+input,
+select {
   width: 100%;
+}
+
+textarea {
   min-height: 220px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.85rem;
@@ -56,6 +68,15 @@ button:hover {
   margin-top: 1.3rem;
   padding-top: 0.75rem;
   border-top: 1px solid #ececec;
+}
+
+.timer-readout {
+  font-size: 2rem;
+  font-weight: 800;
+}
+
+.timer-warning {
+  color: #dc2626;
 }
 
 .color-swatches {
@@ -85,9 +106,14 @@ main {
   font-weight: 600;
 }
 
-#stage {
+#teacherStage,
+#audienceStage {
   position: relative;
-  min-height: calc(100vh - 4rem);
+  min-height: calc(100vh - 7rem);
+}
+
+#audienceStage {
+  display: none;
 }
 
 .page {
@@ -164,7 +190,8 @@ main {
   border-left: 4px solid #58a6ff;
 }
 
-.answer.hidden {
+.answer.hidden,
+.answer.audience-answer {
   display: none;
 }
 
@@ -181,6 +208,31 @@ main {
   cursor: crosshair;
 }
 
+.mini-whiteboards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.5rem;
+}
+
+.mini-board-card {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 0.5rem;
+  background: #fbfbfb;
+}
+
+.participation-hub {
+  margin-top: 1rem;
+}
+
+.tool-card {
+  border: 1px solid #d7defc;
+  background: #f5f7ff;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
 body.audience-mode .panel {
   display: none;
 }
@@ -189,15 +241,36 @@ body.audience-mode .app-shell {
   grid-template-columns: 1fr;
 }
 
-body.audience-mode #status {
+body.audience-mode #teacherStage {
+  display: none;
+}
+
+body.audience-mode #audienceStage {
+  display: block;
+}
+
+body.board-mode .page {
+  max-width: 100%;
+  min-height: 82vh;
   font-size: 1.2rem;
+}
+
+body.tablet-mode .page {
+  max-width: 720px;
+}
+
+body.tablet-mode .panel {
+  width: 290px;
 }
 
 @media print {
   .panel,
   #status,
   .paste-hint,
-  .resize-handle {
+  .resize-handle,
+  #audienceStage,
+  #participationHub,
+  .offline-banner {
     display: none !important;
   }
 
@@ -215,5 +288,9 @@ body.audience-mode #status {
 
   .answer.hidden {
     display: block;
+  }
+
+  .page.hide-annotation-on-print .annotator-layer {
+    display: none;
   }
 }
