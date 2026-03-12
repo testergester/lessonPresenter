@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lesson-presenter-v1';
+const CACHE_NAME = 'lesson-presenter-v2';
 const ASSETS = ['./', './index.html', './styles.css', './main.js', './schema/lesson.schema.json'];
 
 self.addEventListener('install', (event) => {
@@ -12,5 +12,21 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
+  const request = event.request;
+  const isDocument = request.mode === 'navigate' || request.destination === 'document';
+
+  if (isDocument) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+          return response;
+        })
+        .catch(() => caches.match(request).then((cached) => cached || caches.match('./index.html')))
+    );
+    return;
+  }
+
+  event.respondWith(caches.match(request).then((cached) => cached || fetch(request)));
 });

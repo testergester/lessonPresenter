@@ -62,43 +62,141 @@ let miniWhiteboardsVisible = false;
 
 const sampleLesson = {
   lesson: {
-    id: 'sample-lesson',
-    title: 'Math Warm-up',
+    id: 'u5_2_c2_writing_fronting_01',
+    title: 'A Description: Learn to Use Fronting',
+    unit: '5.2',
+    lessonType: 'Writing',
+    level: 'C2',
+    ageGroup: 'Adults 28+',
+    durationMinutes: 120,
+    theme: 'Looks can be deceiving',
+    mainAim: 'Write a descriptive text using controlled fronting.',
+    subsidiaryAims: ['Notice model organisation', 'Use fronting for effect'],
+    prerequisiteKnowledge: ['Punctuation marks'],
+    assumptions: ['Students can analyse literary effects at C2 level.'],
+    materials: [
+      {
+        id: 'sb_u5_2',
+        type: 'coursebook_page',
+        title: 'Student Book Unit 5.2',
+        source: 'uploaded image',
+        notes: 'Model text and practice'
+      }
+    ],
+    languageFocus: {
+      targetLanguage: 'Fronting for literary description',
+      functions: ['Foreground information'],
+      forms: ['Carefully, I moved closer.'],
+      pronunciation: ['Pause after fronted element when reading aloud.'],
+      punctuation: ['Comma after introductory participle clauses.']
+    },
+    writingTask: {
+      genre: 'Descriptive writing',
+      audience: 'Creative writing magazine',
+      prompt: 'Write on the theme looks can be deceiving.',
+      wordCount: { min: 220, max: 280 },
+      successCriteria: ['Clear reveal', 'Controlled fronting']
+    },
     stages: [
       {
-        id: 's1',
+        id: 'stage_01',
         order: 1,
-        name: 'Arithmetic',
-        stageType: 'practice',
-        durationMinutes: 10,
+        name: 'Lead-in',
+        stageType: 'warm_up',
+        durationMinutes: 8,
+        aim: 'Activate interest in the theme.',
+        interaction: 'S-S, WC',
+        procedure: ['Discuss examples where appearance is misleading.'],
+        instructions: ['Discuss in pairs and share one example.'],
         content: {
-          text: 'Solve each problem mentally before revealing answers.',
-          questions: ['12 + 15 = ?', '9 × 6 = ?'],
-          prompts: ['Discuss your strategy.']
+          text: 'Students discuss misleading appearances in life and work.',
+          questions: ['What was the first impression?', 'What was the reality?'],
+          items: [],
+          prompts: ['Person', 'Place', 'Professional situation'],
+          examples: ['An elegant hotel that was dirty and noisy.']
         },
         answers: {
+          type: 'open',
           items: [
-            { answer: '27', alternatives: [], notes: '' },
-            { answer: '54', alternatives: [], notes: '' }
+            {
+              questionId: 'lead_in_open',
+              answer: 'Any relevant example connected to misleading appearances is acceptable.',
+              alternatives: ['A polished presentation with no real substance.'],
+              notes: 'Aim is engagement and theme activation.'
+            }
           ]
-        }
+        },
+        teacherNotes: ['Keep this stage brisk and focused on theme.'],
+        anticipatedProblems: [
+          {
+            problem: 'Examples may be too general.',
+            solution: 'Prompt for first impression and hidden reality.'
+          }
+        ],
+        boardPlan: ['LOOKS CAN BE DECEIVING', 'first impression -> reality'],
+        timingNotes: ['Spend no more than 2 minutes on class feedback.']
       },
       {
-        id: 's2',
+        id: 'stage_02',
         order: 2,
-        name: 'Word Problems',
-        stageType: 'application',
-        durationMinutes: 15,
+        name: 'Language Focus: Fronting',
+        stageType: 'language_analysis',
+        durationMinutes: 12,
+        aim: 'Clarify fronting forms and punctuation.',
+        interaction: 'WC',
+        procedure: ['Elicit fronting examples and board key patterns.'],
+        instructions: ['Look at sentence openings and discuss effect.'],
         content: {
-          text: 'Read each scenario and model with equations.',
-          questions: ['A train has 38 passengers...'],
-          prompts: ['What operation is needed first?']
+          text: 'Teacher clarifies fronting patterns used in literary description.',
+          questions: ['Does fronting change meaning or focus?', 'In "Only then did I understand", is inversion needed?'],
+          items: [],
+          prompts: [],
+          examples: ['Only then did I understand the truth.']
         },
         answers: {
-          items: [{ answer: 'Subtract then add.', alternatives: [], notes: 'Accept equivalent reasoning.' }]
-        }
+          type: 'ccq',
+          items: [
+            {
+              questionId: 'lf_q1',
+              answer: 'Fronting changes focus, not basic meaning.',
+              alternatives: [],
+              notes: 'CCQ 1.'
+            },
+            {
+              questionId: 'lf_q2',
+              answer: 'Inversion is required after limiting/negative expressions.',
+              alternatives: [],
+              notes: 'CCQ 2.'
+            }
+          ]
+        },
+        teacherNotes: ['Stress selective use of fronting.'],
+        anticipatedProblems: [
+          {
+            problem: 'Students may overuse fronting.',
+            solution: 'Remind students effect depends on control and variation.'
+          }
+        ],
+        boardPlan: ['Fronting = change of focus', 'negative fronting + inversion'],
+        timingNotes: ['Keep explanation concise and writing-focused.']
       }
-    ]
+    ],
+    assessment: {
+      criteria: ['Clear contrast between appearance and reality.'],
+      peerChecklist: ['Is the first impression clear?'],
+      teacherFeedbackFocus: ['Controlled use of fronting.']
+    },
+    homework: {
+      assigned: true,
+      task: 'Produce a clean final draft and highlight fronted structures.',
+      instructions: ['Rewrite neatly or type it.', 'Highlight each example of fronting.']
+    },
+    metadata: {
+      author: 'OpenAI',
+      createdAt: '2026-03-09',
+      updatedAt: '2026-03-09',
+      version: '1.0'
+    }
   }
 };
 
@@ -433,6 +531,9 @@ function createPageElement(page, pageIndex, mode = 'teacher') {
 }
 
 function buildPages() {
+  if (!teacherStage || !audienceStage) {
+    throw new Error('Delivery workspace is missing stage containers (#teacherStage / #audienceStage). Please refresh to load the latest app shell.');
+  }
   teacherStage.innerHTML = '';
   audienceStage.innerHTML = '';
   pageCanvases = [];
@@ -462,6 +563,7 @@ function buildPages() {
 }
 
 function buildStageJumpOptions() {
+  if (!stageJump) return;
   stageJump.innerHTML = '';
   lesson.pages.forEach((page, index) => {
     const option = document.createElement('option');
@@ -473,6 +575,7 @@ function buildStageJumpOptions() {
 }
 
 function showPage(index) {
+  if (!teacherStage || !audienceStage) return;
   const teacherPages = [...teacherStage.querySelectorAll('.page')];
   const audiencePages = [...audienceStage.querySelectorAll('.page')];
   teacherPages.forEach((pageItem, i) => {
@@ -486,7 +589,7 @@ function showPage(index) {
     canvas.classList.toggle('active', i === index && annotatorEnabled);
   });
 
-  stageJump.value = String(index);
+  if (stageJump) stageJump.value = String(index);
   setStatus(`Stage ${index + 1}/${lesson.pages.length} • ${lesson.pages[index].title || ''}`);
 }
 
@@ -723,11 +826,13 @@ prevBtn.addEventListener('click', () => {
   }
 });
 
-stageJump.addEventListener('change', () => {
-  currentPageIndex = Number(stageJump.value);
-  showPage(currentPageIndex);
-  persistSnapshot();
-});
+if (stageJump) {
+  stageJump.addEventListener('change', () => {
+    currentPageIndex = Number(stageJump.value);
+    showPage(currentPageIndex);
+    persistSnapshot();
+  });
+}
 
 revealAnswerBtn.addEventListener('click', revealNextAnswer);
 
