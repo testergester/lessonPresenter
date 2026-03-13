@@ -25,6 +25,8 @@ const includeHiddenAnswersPrint = document.getElementById('includeHiddenAnswersP
 const togglePanelMinimizeBtn = document.getElementById('togglePanelMinimizeBtn');
 const panelPositionBtn = document.getElementById('panelPositionBtn');
 const panelToolbarButtons = [...document.querySelectorAll('.toolbar-btn')];
+const controlPanel = document.getElementById('controlPanel');
+const panelContent = document.getElementById('panelContent');
 
 const timerReadout = document.getElementById('timerReadout');
 const timerMinutes = document.getElementById('timerMinutes');
@@ -303,15 +305,26 @@ function setStatus(message) {
   status.textContent = message;
 }
 
+function openPanelOverlay() {
+  document.body.classList.add('panel-overlay-open');
+}
+
+function closePanelOverlay() {
+  document.body.classList.remove('panel-overlay-open');
+}
+
 function setActivePanelSection(targetId) {
   const sections = [...document.querySelectorAll('.feature-section')];
   sections.forEach((section) => section.classList.toggle('active', section.id === targetId));
   panelToolbarButtons.forEach((button) => button.classList.toggle('active', button.dataset.target === targetId));
+  openPanelOverlay();
 }
 
 function togglePanelMinimized() {
   const willMinimize = !document.body.classList.contains('panel-minimized');
   document.body.classList.toggle('panel-minimized', willMinimize);
+  if (willMinimize) closePanelOverlay();
+  else openPanelOverlay();
   if (togglePanelMinimizeBtn) {
     togglePanelMinimizeBtn.textContent = willMinimize ? 'Expand' : 'Minimize';
     togglePanelMinimizeBtn.title = willMinimize ? 'Expand panel' : 'Minimize panel';
@@ -322,6 +335,7 @@ function togglePanelDockPosition() {
   const isBottom = !document.body.classList.contains('panel-bottom');
   document.body.classList.toggle('panel-bottom', isBottom);
   if (panelPositionBtn) panelPositionBtn.textContent = isBottom ? 'Dock: Bottom' : 'Dock: Side';
+  openPanelOverlay();
 }
 
 function createColorSwatches() {
@@ -903,9 +917,11 @@ exportPdfBtn.addEventListener('click', exportForPrint);
 
 panelToolbarButtons.forEach((button) => {
   button.addEventListener('click', () => {
+    if (document.body.classList.contains('panel-minimized')) {
+      togglePanelMinimized();
+    }
     const targetId = button.dataset.target;
     if (targetId) setActivePanelSection(targetId);
-    if (document.body.classList.contains('panel-minimized')) togglePanelMinimized();
   });
 });
 
@@ -918,6 +934,13 @@ document.addEventListener('paste', onPaste);
 window.addEventListener('online', syncOfflineBanner);
 window.addEventListener('offline', syncOfflineBanner);
 
+document.addEventListener('click', (event) => {
+  if (!controlPanel || !panelContent) return;
+  if (document.body.classList.contains('panel-minimized')) return;
+  const clickedInside = controlPanel.contains(event.target);
+  if (!clickedInside) closePanelOverlay();
+});
+
 document.addEventListener('keydown', (event) => {
   if (event.key === 'ArrowRight') nextBtn.click();
   if (event.key === 'ArrowLeft') prevBtn.click();
@@ -927,6 +950,7 @@ document.addEventListener('keydown', (event) => {
 (async () => {
   createColorSwatches();
   setActivePanelSection('section-lesson');
+  openPanelOverlay();
   registerServiceWorker();
   syncOfflineBanner();
 
