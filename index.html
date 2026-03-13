@@ -7,50 +7,111 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <div id="offlineBanner" class="offline-banner" hidden>
+    Offline mode: using cached app + last saved lesson state.
+  </div>
+
   <div class="app-shell">
-    <aside class="panel">
-      <h1>Lesson Presenter</h1>
-      <label for="lessonJson">Lesson JSON</label>
-      <textarea id="lessonJson" spellcheck="false"></textarea>
-      <button id="loadLessonBtn">Load Lesson</button>
-
-      <div class="controls">
-        <h2>Presentation</h2>
-        <button id="prevBtn">Previous Page</button>
-        <button id="nextBtn">Next Page</button>
-        <button id="revealAnswerBtn">Reveal Next Answer</button>
+    <aside class="panel" id="controlPanel">
+      <div class="panel-topbar">
+        <h1>Delivery</h1>
+        <div class="panel-topbar-actions">
+          <button id="panelPositionBtn" class="ghost-btn" type="button" title="Dock below presentation">Dock: Side</button>
+          <button id="togglePanelMinimizeBtn" class="ghost-btn" type="button" title="Minimize panel">Minimize</button>
+        </div>
       </div>
 
-      <div class="controls">
-        <h2>Annotator</h2>
-        <label>Pen Color</label>
-        <div class="color-swatches" id="colorSwatches"></div>
+      <nav class="panel-toolbar" aria-label="Quick tools">
+        <button type="button" class="toolbar-btn active" data-target="section-lesson" title="Lesson">🧾</button>
+        <button type="button" class="toolbar-btn" data-target="section-presentation" title="Presentation">🎬</button>
+        <button type="button" class="toolbar-btn" data-target="section-timer" title="Timer">⏱️</button>
+        <button type="button" class="toolbar-btn" data-target="section-annotator" title="Annotator">✏️</button>
+        <button type="button" class="toolbar-btn" data-target="section-view" title="View">🖥️</button>
+        <button type="button" class="toolbar-btn" data-target="section-participation" title="Participation">👥</button>
+        <button type="button" class="toolbar-btn" data-target="section-export" title="Export">📄</button>
+      </nav>
 
-        <label for="penSize">Pen Size</label>
-        <input id="penSize" type="range" min="2" max="20" value="4" />
-        <span id="penSizeValue">4 px</span>
+      <div id="panelContent" class="panel-content">
+        <section id="section-lesson" class="controls feature-section active">
+          <h2>Lesson</h2>
+          <label for="lessonJson">Lesson JSON</label>
+          <textarea id="lessonJson" spellcheck="false"></textarea>
+          <button id="loadLessonBtn">Load Lesson</button>
+        </section>
 
-        <button id="toggleAnnotatorBtn">Enable Annotator</button>
-        <button id="undoAnnotationBtn">Undo Annotation Stroke</button>
-        <button id="redoAnnotationBtn">Redo Annotation Stroke</button>
-        <button id="clearPageAnnotationBtn">Clear Current Page Annotation</button>
-      </div>
+        <section id="section-presentation" class="controls feature-section">
+          <h2>Presentation</h2>
+          <button id="prevBtn">Previous Page</button>
+          <button id="nextBtn">Next Page</button>
+          <button id="revealAnswerBtn">Reveal Next Answer</button>
+          <label for="stageJump">Jump to stage</label>
+          <select id="stageJump"></select>
+        </section>
 
-      <div class="controls">
-        <h2>View Mode</h2>
-        <button id="presenterViewBtn">Presenter View</button>
-        <button id="audienceViewBtn">Audience View</button>
-      </div>
+        <section id="section-timer" class="controls feature-section">
+          <h2>Timer</h2>
+          <div class="timer-readout" id="timerReadout">00:00</div>
+          <label for="timerMinutes">Minutes</label>
+          <input id="timerMinutes" type="number" min="1" max="180" value="5" />
+          <button id="startTimerBtn">Start / Restart</button>
+          <button id="pauseTimerBtn">Pause</button>
+          <button id="resetTimerBtn">Reset</button>
+        </section>
 
-      <div class="controls">
-        <h2>Export</h2>
-        <button id="exportPdfBtn">Export Final Lesson as PDF</button>
+        <section id="section-annotator" class="controls feature-section">
+          <h2>Annotator</h2>
+          <label>Pen Color</label>
+          <div class="color-swatches" id="colorSwatches"></div>
+
+          <label for="penSize">Pen Size</label>
+          <input id="penSize" type="range" min="2" max="20" value="4" />
+          <span id="penSizeValue">4 px</span>
+
+          <button id="toggleAnnotatorBtn">Enable Annotator</button>
+          <button id="undoAnnotationBtn">Undo Annotation Stroke</button>
+          <button id="redoAnnotationBtn">Redo Annotation Stroke</button>
+          <button id="clearPageAnnotationBtn">Clear Current Page Annotation</button>
+        </section>
+
+        <section id="section-view" class="controls feature-section">
+          <h2>View Mode</h2>
+          <button id="presenterViewBtn">Teacher View</button>
+          <button id="audienceViewBtn">Audience View</button>
+          <button id="boardModeBtn">Board Mode</button>
+          <button id="tabletModeBtn">Tablet Mode</button>
+        </section>
+
+        <section id="section-participation" class="controls feature-section">
+          <h2>Live Participation</h2>
+          <label for="pollQuestion">Poll question</label>
+          <input id="pollQuestion" type="text" placeholder="Type a quick poll" />
+          <button id="launchPollBtn">Launch Poll</button>
+          <label for="exitTicketPrompt">Exit ticket prompt</label>
+          <input id="exitTicketPrompt" type="text" placeholder="One thing you learned..." />
+          <button id="showExitTicketBtn">Show Exit Ticket</button>
+          <button id="coldCallBtn">Cold-call Student</button>
+          <button id="toggleMiniWhiteboardBtn">Toggle Mini Whiteboards</button>
+        </section>
+
+        <section id="section-export" class="controls feature-section">
+          <h2>Export</h2>
+          <label><input id="includeAnnotationsPrint" type="checkbox" checked /> Include annotations in print</label>
+          <label><input id="includeHiddenAnswersPrint" type="checkbox" checked /> Reveal all answers in print</label>
+          <button id="exportPdfBtn">Print / Export PDF</button>
+        </section>
       </div>
     </aside>
 
     <main>
       <div id="status"></div>
-      <section id="stage" aria-live="polite" tabindex="0"></section>
+      <section id="teacherStage" aria-live="polite" tabindex="0"></section>
+      <section id="audienceStage" aria-live="polite"></section>
+      <section id="participationHub" class="participation-hub" hidden>
+        <h3>Live Participation</h3>
+        <div id="pollCard" class="tool-card" hidden></div>
+        <div id="exitTicketCard" class="tool-card" hidden></div>
+        <div id="coldCallCard" class="tool-card" hidden></div>
+      </section>
     </main>
   </div>
 
