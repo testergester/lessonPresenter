@@ -22,6 +22,9 @@ const stageJump = document.getElementById('stageJump');
 const offlineBanner = document.getElementById('offlineBanner');
 const includeAnnotationsPrint = document.getElementById('includeAnnotationsPrint');
 const includeHiddenAnswersPrint = document.getElementById('includeHiddenAnswersPrint');
+const togglePanelMinimizeBtn = document.getElementById('togglePanelMinimizeBtn');
+const panelPositionBtn = document.getElementById('panelPositionBtn');
+const panelToolbarButtons = [...document.querySelectorAll('.toolbar-btn')];
 
 const timerReadout = document.getElementById('timerReadout');
 const timerMinutes = document.getElementById('timerMinutes');
@@ -298,6 +301,27 @@ function parseLesson(jsonText) {
 
 function setStatus(message) {
   status.textContent = message;
+}
+
+function setActivePanelSection(targetId) {
+  const sections = [...document.querySelectorAll('.feature-section')];
+  sections.forEach((section) => section.classList.toggle('active', section.id === targetId));
+  panelToolbarButtons.forEach((button) => button.classList.toggle('active', button.dataset.target === targetId));
+}
+
+function togglePanelMinimized() {
+  const willMinimize = !document.body.classList.contains('panel-minimized');
+  document.body.classList.toggle('panel-minimized', willMinimize);
+  if (togglePanelMinimizeBtn) {
+    togglePanelMinimizeBtn.textContent = willMinimize ? 'Expand' : 'Minimize';
+    togglePanelMinimizeBtn.title = willMinimize ? 'Expand panel' : 'Minimize panel';
+  }
+}
+
+function togglePanelDockPosition() {
+  const isBottom = !document.body.classList.contains('panel-bottom');
+  document.body.classList.toggle('panel-bottom', isBottom);
+  if (panelPositionBtn) panelPositionBtn.textContent = isBottom ? 'Dock: Bottom' : 'Dock: Side';
 }
 
 function createColorSwatches() {
@@ -877,6 +901,17 @@ toggleMiniWhiteboardBtn.addEventListener('click', toggleMiniWhiteboards);
 
 exportPdfBtn.addEventListener('click', exportForPrint);
 
+panelToolbarButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    const targetId = button.dataset.target;
+    if (targetId) setActivePanelSection(targetId);
+    if (document.body.classList.contains('panel-minimized')) togglePanelMinimized();
+  });
+});
+
+if (togglePanelMinimizeBtn) togglePanelMinimizeBtn.addEventListener('click', togglePanelMinimized);
+if (panelPositionBtn) panelPositionBtn.addEventListener('click', togglePanelDockPosition);
+
 teacherStage.addEventListener('click', () => teacherStage.focus());
 document.addEventListener('paste', onPaste);
 
@@ -891,6 +926,7 @@ document.addEventListener('keydown', (event) => {
 
 (async () => {
   createColorSwatches();
+  setActivePanelSection('section-lesson');
   registerServiceWorker();
   syncOfflineBanner();
 
