@@ -1,3 +1,5 @@
+import {SlideEditor, stageToSlide} from './src/editor.js';
+import {packLesson, unpackLesson, validateDocument, downloadBlob, saveSession, readSession, DOCUMENT_FORMAT} from './src/document.js';
 'use strict';
 const $ = (id) => document.getElementById(id);
 const OFFLINE_SNAPSHOT_KEY = 'lessonPresenter.snapshot.v1';
@@ -7,8 +9,9 @@ let lesson = {title: '', pages: []};
 let currentPageIndex = 0;
 let revealedAnswerCountByPage = [];
 let annotationStateByPage = [];
-let pageCanvases = [];
-let resizeObserver;
+let boardEditor = null;
+let saveChain = Promise.resolve();
+let pendingLessonFile = null;
 let selectedColor = penColors[0];
 let selectedPenSize = 4;
 let annotatorEnabled = false;
@@ -24,6 +27,7 @@ let lessonSchema;
 let dialogOpener;
 let snapshotTimeout;
 let lessonPanelState = {pinned:false, hovered:false, focused:false};
+let guidancePanelState = {pinned:false, hovered:false, focused:false};
 const sampleLesson = {
   lesson: {
     id: 'u5_2_c2_writing_fronting_01',
@@ -213,7 +217,7 @@ function lessonSchemaToPresenterSchema(source) {
       if (!question.answer && matched) question.answer = displayText(matched.answer);
     });
     if (!questions.length) answers.forEach((answer,i) => questions.push({id:answer.questionId || `q${i+1}`,prompt: `Discussion ${i+1}`,answer:displayText(answer.answer)}));
-    return {stageId:stage.id || `stage-${index+1}`,title:stage.name || stage.stageType || `Stage ${index+1}`,stageType:stage.stageType || 'Activity',durationMinutes:stage.durationMinutes || 5,aim:stage.aim || '',interaction:stage.interaction || '',instructions:list(stage.instructions),procedure:list(stage.procedure),teacherNotes:list(stage.teacherNotes),timingNotes:list(stage.timingNotes),anticipatedProblems:list(stage.anticipatedProblems),content:content.text || '',prompts:list(content.prompts),examples:list(content.examples),items:list(content.items),questions};
+    return {stageId:stage.id || `stage-${index+1}`,title:stage.name || stage.stageType || `Stage ${index+1}`,hidden:stage.hidden===true,stageType:stage.stageType || 'Activity',durationMinutes:stage.durationMinutes || 5,aim:stage.aim || '',interaction:stage.interaction || '',instructions:list(stage.instructions),procedure:list(stage.procedure),teacherNotes:list(stage.teacherNotes),timingNotes:list(stage.timingNotes),anticipatedProblems:list(stage.anticipatedProblems),content:content.text || '',prompts:list(content.prompts),examples:list(content.examples),items:list(content.items),questions};
   });
   return {title:meta.title || 'Untitled lesson',level:meta.level || '',lessonType:meta.lessonType || '',durationMinutes:meta.durationMinutes || pages.reduce((total,page)=>total+page.durationMinutes,0),mainAim:meta.mainAim || '',pages};
 }
@@ -231,21 +235,39 @@ function parseLesson(jsonText) {
   });
   return lessonSchemaToPresenterSchema(source);
 }
-function setLessonPanel(changes) {
-  Object.assign(lessonPanelState, changes);
-  const open = lessonPanelState.pinned || lessonPanelState.hovered || lessonPanelState.focused;
-  document.body.classList.toggle('lesson-plan-open', open);
-  $('lessonPlanToggle').setAttribute('aria-expanded', String(open));
-  $('lessonPlanToggle').setAttribute('aria-pressed', String(lessonPanelState.pinned));
-  $('lessonOutline').inert = !open;
+function setSidebarPanel(side, changes) {
+  const left=side==='lesson';
+  const state=left?lessonPanelState:guidancePanelState;
+  Object.assign(state,changes);
+  const open=state.pinned||state.hovered||state.focused;
+  document.body.classList.toggle(left?'lesson-plan-open':'teacher-panel-open',open);
+  document.body.classList.toggle(left?'lesson-plan-pinned':'teacher-panel-pinned',state.pinned);
+  $(left?'lessonPlanToggle':'teacherPanelToggle').setAttribute('aria-expanded',String(open));
+  $(left?'lessonPlanToggle':'teacherPanelToggle').setAttribute('aria-pressed',String(state.pinned));
+  $(left?'lessonOutline':'teacherPanel').inert=!open;
 }
+function setLessonPanel(changes) {setSidebarPanel('lesson',changes);}
+function setGuidancePanel(changes) {setSidebarPanel('guidance',changes);}
 function closeLessonPanel() {
   setLessonPanel({pinned:false, hovered:false, focused:false});
   if ($('lessonOutline').contains(document.activeElement)) $('lessonPlanToggle').focus();
 }
+function closeGuidancePanel() {
+  setGuidancePanel({pinned:false,hovered:false,focused:false});
+  if($('teacherPanel').contains(document.activeElement))$('teacherPanelToggle').focus();
+}
+function bindSidebar({navigation,panel,toggle,close,state,set,hide}) {
+  $(toggle).addEventListener('click',()=>state.pinned?hide():set({pinned:true}));
+  $(close).addEventListener('click',hide);
+  $(navigation).addEventListener('pointerenter',event=>{if(event.pointerType==='mouse')set({hovered:true,focused:false});});
+  $(navigation).addEventListener('pointerleave',()=>set({hovered:false,focused:false}));
+  $(panel).addEventListener('focusin',event=>{if(event.target.matches(':focus-visible'))set({focused:true});});
+  $(panel).addEventListener('focusout',event=>{if(!$(panel).contains(event.relatedTarget))set({focused:false});});
+  $(navigation).addEventListener('pointerdown',()=>set({focused:false}));
+}
 function setStatus(message) { $('status').textContent = message; }
 function openTools(target) {
-  const titles = {'section-lesson':'Import lesson','section-annotator':'Annotate your lesson','section-participation':'Bring everyone in','section-view':'Display settings','section-export':'Export your lesson','section-shortcuts':'Keyboard shortcuts'};
+  const titles = {'section-lesson':'Import lesson','section-annotator':'Annotate your lesson','section-participation':'Bring everyone in','section-view':'Display settings','section-export':'Export your lesson','section-shortcuts':'Keyboard shortcuts','section-shapes':'Add a shape','section-stickers':'Add a sticker','section-video':'Embed a YouTube video'};
   document.querySelectorAll('.feature-section').forEach(section=>section.classList.toggle('active',section.id===target));
   $('dialogTitle').textContent = titles[target];
   if (!$('toolsDialog').open) {
@@ -277,138 +299,106 @@ function renderGuidance(page) {
     container.append(group);
   }
 }
+function studentMode() {return document.body.classList.contains('preview-mode')||document.body.classList.contains('audience-mode');}
+function stageIndices(visibleOnly=studentMode()) {return lesson.pages.flatMap((page,index)=>visibleOnly&&page.hidden?[]:[index]);}
+function adjacentStage(direction) {
+  const indices=stageIndices();
+  return direction>0?indices.find(index=>index>currentPageIndex):indices.findLast(index=>index<currentPageIndex);
+}
+function navigateStage(direction) {const index=adjacentStage(direction);if(index!==undefined)goToStage(index);}
+function reorderStage(from,to) {
+  if(studentMode()||from===to||!Number.isInteger(from)||!Number.isInteger(to)||!lesson.pages[from]||!lesson.pages[to])return;
+  const order=lesson.pages.map((_,index)=>index);order.splice(to,0,order.splice(from,1)[0]);
+  const active=order.indexOf(currentPageIndex);
+  lesson.pages=order.map(index=>lesson.pages[index]);
+  revealedAnswerCountByPage=order.map(index=>revealedAnswerCountByPage[index]||0);
+  annotationStateByPage=order.map(index=>annotationStateByPage[index]||{responses:[]});
+  boardEditor.reorderSlides(order);
+  currentPageIndex=active;renderOutline();showPage(active);persistSnapshot();
+  $('stageList').querySelector(`[data-stage-index="${to}"] .stage-item`)?.focus();
+  setStatus(`${lesson.pages[to].title} moved to slide ${to+1}.`);
+}
+function toggleStageHidden(index) {
+  if(studentMode()||!lesson.pages[index])return;
+  const page=lesson.pages[index];page.hidden=!page.hidden;
+  renderOutline();showPage(currentPageIndex);persistSnapshot();
+  $('stageList').querySelector(`[data-stage-index="${index}"] [data-stage-action="visibility"]`)?.focus();
+  setStatus(page.hidden?`${page.title} is hidden from student preview, presentation, and PDF export.`:`${page.title} is included in presentation again.`);
+}
 function renderOutline() {
   $('lessonTitle').textContent = lesson.title;
   $('presentLessonTitle').textContent = lesson.title;
   $('lessonMeta').replaceChildren();
   [lesson.level,lesson.lessonType,lesson.durationMinutes ? `${lesson.durationMinutes} min` : ''].filter(Boolean).forEach(text=>$('lessonMeta').append(element('span','',text)));
   $('stageCount').textContent = `${lesson.pages.length} stage${lesson.pages.length === 1 ? '' : 's'}`;
-  $('outlineDuration').textContent = `${lesson.pages.reduce((total,page)=>total+(page.durationMinutes || 5),0)} min planned`;
+  $('outlineDuration').textContent = `${lesson.pages.filter(page=>!page.hidden).reduce((total,page)=>total+(page.durationMinutes || 5),0)} min planned`;
   $('lessonAim').textContent = lesson.mainAim || 'Move through each stage at your class’s pace.';
   $('stageList').replaceChildren();
   lesson.pages.forEach((page,index)=>{
+    const row=element('div','stage-row');row.dataset.stageIndex=index;row.classList.toggle('stage-hidden',!!page.hidden);row.hidden=studentMode()&&!!page.hidden;row.draggable=!studentMode();
     const button = element('button','stage-item');
+    button.dataset.stageIndex=index;
     button.type = 'button';
     const info = element('span','stage-info');
-    info.append(element('strong','',page.title),element('small','',`${page.durationMinutes || 5} min · ${(page.stageType || 'activity').replaceAll('_',' ')}`));
+    info.append(element('strong','',page.title),element('small','',`${page.hidden?'Hidden · ':''}${page.durationMinutes || 5} min · ${(page.stageType || 'activity').replaceAll('_',' ')}`));
     button.append(element('span','stage-number',String(index+1).padStart(2,'0')),info);
     button.addEventListener('click',()=>goToStage(index));
-    $('stageList').append(button);
+    const tools=element('div','stage-tools');tools.setAttribute('aria-label',`Organize ${page.title}`);
+    const handle=element('span','stage-drag-handle','⠿');handle.title='Drag to reorder slide';handle.setAttribute('aria-hidden','true');tools.append(handle);
+    const action=(name,label,callback,disabled=false)=>{const control=element('button','stage-action',label);control.type='button';control.title=name;control.setAttribute('aria-label',`${name}: ${page.title}`);control.setAttribute('data-editor-action','');control.dataset.unavailable=String(disabled);control.disabled=disabled||studentMode();control.addEventListener('click',event=>{event.stopPropagation();callback();});tools.append(control);return control;};
+    action('Move slide up','↑',()=>reorderStage(index,index-1),index===0);
+    action('Move slide down','↓',()=>reorderStage(index,index+1),index===lesson.pages.length-1);
+    const visibility=action(page.hidden?'Show slide':'Hide slide',page.hidden?'Show':'Hide',()=>toggleStageHidden(index));visibility.dataset.stageAction='visibility';visibility.setAttribute('aria-pressed',String(!!page.hidden));
+    row.append(button,tools);
+    row.addEventListener('dragstart',event=>{if(studentMode()){event.preventDefault();return;}event.dataTransfer.setData('application/x-lesson-slide',String(index));event.dataTransfer.effectAllowed='move';row.classList.add('dragging');});
+    row.addEventListener('dragover',event=>{if(studentMode()||!event.dataTransfer.types.includes('application/x-lesson-slide'))return;event.preventDefault();event.dataTransfer.dropEffect='move';row.classList.add('drop-target');});
+    row.addEventListener('dragleave',()=>row.classList.remove('drop-target'));
+    row.addEventListener('dragend',()=>{$('stageList').querySelectorAll('.stage-row').forEach(node=>node.classList.remove('drop-target','dragging'));});
+    row.addEventListener('drop',event=>{event.preventDefault();row.classList.remove('drop-target');const value=event.dataTransfer.getData('application/x-lesson-slide');if(value!=='')reorderStage(Number(value),index);});
+    $('stageList').append(row);
   });
 }
-function createPageElement(page,index,mode) {
-  const article = element('article','page');
-  article.dataset.pageIndex = index;
-  article.append(element('div','page-kicker',`${(page.stageType || 'activity').replaceAll('_',' ').toUpperCase()}${page.interaction ? ` · ${page.interaction}` : ''}`),element('h2','page-title',page.title));
-  if (page.content) article.append(element('p','page-content',page.content));
-  if (list(page.instructions).length) {
-    const instructions = element('div','instruction-block');
-    instructions.append(element('h3','','YOUR TASK'));
-    page.instructions.forEach(text=>instructions.append(element('p','',displayText(text))));
-    article.append(instructions);
-  }
-  if (list(page.prompts).length) {
-    const chips = element('div','prompt-chips');
-    page.prompts.forEach(text=>chips.append(element('span','',displayText(text))));
-    article.append(chips);
-  }
-  list(page.items).forEach(text=>article.append(element('p','question-prompt',displayText(text))));
-  page.questions.forEach((question,questionIndex)=>{
-    const block = element('div','question');
-    const body = element('div','question-body');
-    body.append(element('div','question-prompt',question.prompt));
-    if (question.answer) {
-      const answer = element('div','answer hidden',question.answer);
-      body.append(answer);
-    }
-    block.append(element('span','question-number',questionIndex+1),body);
-    article.append(block);
-  });
-  if (list(page.examples).length) {
-    const examples = element('div','examples-block');
-    examples.append(element('h3','','AN EXAMPLE TO GET YOU THINKING'));
-    page.examples.forEach(text=>examples.append(element('p','',displayText(text))));
-    article.append(examples);
-  }
-  const images = element('div','pasted-images');
-  article.append(images);
-  list(annotationStateByPage[index]?.images).forEach(image=>addImageElement(images,image,index,mode));
-  if (mode === 'teacher' && miniWhiteboardsVisible) {
-    const boards = element('div','mini-whiteboards');
-    (roster.length ? roster : ['Response 1','Response 2','Response 3','Response 4']).slice(0,12).forEach((name,i)=>{
-      const card = element('div','mini-board-card');
-      const label = element('label','',name);
-      const input = element('textarea');
-      input.id = `response-${index}-${i}`;
-      label.htmlFor = input.id;
-      input.placeholder = 'Write a response…';
-      input.value = annotationStateByPage[index]?.responses?.[i] || '';
-      input.addEventListener('input',()=>{
-        annotationStateByPage[index].responses ||= [];
-        annotationStateByPage[index].responses[i] = input.value;
-        queueSnapshot();
-      });
-      card.append(label,input);boards.append(card);
-    });
-    article.append(boards);
-  }
-  const footer = element('div','page-footer');
-  footer.append(element('span','','LESSON PRESENTER'),element('span','',`${String(index+1).padStart(2,'0')} / ${String(lesson.pages.length).padStart(2,'0')}`));
-  article.append(footer);
-  const canvas = element('canvas','annotator-layer');
-  canvas.setAttribute('aria-hidden','true');
-  article.append(canvas);
-  attachDrawingEvents(canvas,index);
-  return article;
+function buildPages(slides) {
+  boardEditor.setLesson(slides || lesson.pages.map(stageToSlide));
+  renderResponseBoards();
 }
-function buildPages() {
-  if (resizeObserver) resizeObserver.disconnect();
-  $('teacherStage').replaceChildren();$('audienceStage').replaceChildren();pageCanvases=[];
-  lesson.pages.forEach((page,index)=>{
-    const teacher = createPageElement(page,index,'teacher');
-    const audience = createPageElement(page,index,'audience');
-    teacher.style.display = audience.style.display = 'none';
-    $('teacherStage').append(teacher);$('audienceStage').append(audience);
-    pageCanvases.push(teacher.querySelector('canvas'));
-  });
-  resizeObserver = new ResizeObserver(()=>resizeVisibleCanvases());
-  [...$('teacherStage').children,...$('audienceStage').children].forEach(page=>resizeObserver.observe(page));
-}
-function activePage(container = $('teacherStage')) { return container.children[currentPageIndex]; }
 function answerTotal() { return lesson.pages[currentPageIndex]?.questions.filter(q=>q.answer).length || 0; }
 function syncAnswers() {
   const shown = revealedAnswerCountByPage[currentPageIndex] || 0;
-  [$('teacherStage'),$('audienceStage')].forEach(container=>{
-    activePage(container)?.querySelectorAll('.answer').forEach((answer,i)=>answer.classList.toggle('hidden',i>=shown));
-  });
+  boardEditor?.setReveal(shown);
   const total = answerTotal();
   $('revealAnswerBtn').disabled = $('presentationRevealBtn').disabled = shown >= total;
   $('revealAnswerBtn').textContent = total ? shown >= total ? 'Answers revealed' : `Reveal answer · ${shown}/${total}` : 'No answers';
   $('hideAnswersBtn').hidden = shown === 0;
 }
+function resizeVisibleCanvases() { boardEditor?.resize(); }
 function showPage(index) {
   if (!lesson.pages[index]) return;
   currentPageIndex = index;
-  [$('teacherStage'),$('audienceStage')].forEach(container=>[...container.children].forEach((page,i)=>page.style.display=i===index?'block':'none'));
-  $('stageList').querySelectorAll('button').forEach((button,i)=>{
+  if (boardEditor.index !== index || !boardEditor.ready) boardEditor.show(index,revealedAnswerCountByPage[index] || 0);
+  renderResponseBoards();
+  $('stageList').querySelectorAll('.stage-item').forEach(button=>{
+    const i=Number(button.dataset.stageIndex);
     button.classList.toggle('active',i===index);
     if (i===index) button.setAttribute('aria-current','step'); else button.removeAttribute('aria-current');
   });
   const page = lesson.pages[index];
+  const indices=stageIndices();const position=indices.indexOf(index)+1;const total=indices.length;
   $('stageBreadcrumb').textContent = page.title;
-  $('stageCounter').textContent = `${String(index+1).padStart(2,'0')} / ${String(lesson.pages.length).padStart(2,'0')}`;
-  $('progressLabel').textContent = `Stage ${index+1} of ${lesson.pages.length}`;
-  $('presentationCounter').textContent = `${index+1} / ${lesson.pages.length}`;
-  $('progressFill').style.width = `${(index+1)/lesson.pages.length*100}%`;
-  $('prevBtn').disabled = $('presentationPrevBtn').disabled = index === 0;
-  $('nextBtn').disabled = $('presentationNextBtn').disabled = index === lesson.pages.length-1;
-  $('nextStageLabel').textContent = lesson.pages[index+1] ? `${lesson.pages[index+1].title} · ${lesson.pages[index+1].durationMinutes || 5} min` : 'Final stage. Time to reflect and wrap up.';
+  $('stageCounter').textContent = `${String(position).padStart(2,'0')} / ${String(total).padStart(2,'0')}`;
+  $('progressLabel').textContent = `Stage ${position} of ${total}${!studentMode()&&page.hidden?' · Hidden from students':''}`;
+  $('presentationCounter').textContent = `${position} / ${total}`;
+  $('progressFill').style.width = `${position/total*100}%`;
+  $('prevBtn').disabled = $('presentationPrevBtn').disabled = adjacentStage(-1)===undefined;
+  $('nextBtn').disabled = $('presentationNextBtn').disabled = adjacentStage(1)===undefined;
+  const next=lesson.pages[adjacentStage(1)];
+  $('nextStageLabel').textContent = next ? `${next.title} · ${next.durationMinutes || 5} min` : 'Final stage. Time to reflect and wrap up.';
   $('suggestedTime').textContent = `${page.durationMinutes || 5} min planned`;
   renderGuidance(page);syncAnswers();syncDrawing();
   requestAnimationFrame(resizeVisibleCanvases);
 }
 function goToStage(index) {
-  if (index < 0 || index >= lesson.pages.length || index === currentPageIndex) return;
+  if (index < 0 || index >= lesson.pages.length || index === currentPageIndex || studentMode()&&lesson.pages[index].hidden) return;
   showPage(index);
   $('timerMinutes').value = lesson.pages[index].durationMinutes || 5;
   resetTimer();
@@ -422,12 +412,12 @@ function revealNextAnswer() {
   syncAnswers();persistSnapshot();
   setStatus(`Answer ${revealedAnswerCountByPage[currentPageIndex]} of ${total} revealed.`);
 }
-function initLesson(parsed) {
+function initLesson(parsed, slides) {
   lesson = parsed;currentPageIndex=0;
   revealedAnswerCountByPage = lesson.pages.map(()=>0);
   annotationStateByPage = lesson.pages.map(()=>({strokes:[],redoStack:[],images:[],responses:[]}));
   miniWhiteboardsVisible=false;setAnnotation(false);
-  renderOutline();buildPages();showPage(0);
+  renderOutline();buildPages(slides);showPage(0);
   $('timerMinutes').value = lesson.pages[0].durationMinutes || 5;resetTimer();
   $('participationHub').hidden=true;
   persistSnapshot();setStatus('Lesson ready. Start with the first stage, or choose any stage in the lesson flow.');
@@ -463,18 +453,23 @@ function pauseTimer() {
 }
 function resetTimer() {timerRunning=false;timerStarted=false;clearInterval(timerInterval);remainingSeconds=timerDuration();renderTimer();}
 function setPreview(enabled) {
+  if(enabled&&lesson.pages.length&&!stageIndices(true).length){setStatus('Show at least one slide in the lesson plan before opening student preview.');return;}
   document.body.classList.toggle('preview-mode',enabled);
   $('presenterViewBtn').classList.toggle('selected',!enabled);$('presenterViewBtn').setAttribute('aria-pressed',String(!enabled));
   $('previewBtn').classList.toggle('selected',enabled);$('previewBtn').setAttribute('aria-pressed',String(enabled));
   $('canvasLabel').textContent = enabled ? 'STUDENT VIEW · TEACHER NOTES HIDDEN' : 'TEACHER WORKSPACE';
+  if(lesson.pages.length){renderOutline();if(enabled&&lesson.pages[currentPageIndex].hidden)goToStage(stageIndices(true)[0]);else showPage(currentPageIndex);}
   syncDrawing();
-  setStatus(enabled ? 'Student view: teacher guidance is hidden. Board tools remain below the lesson.' : 'Teacher view: stage guidance and notes are visible.');
+  setStatus(enabled ? 'Student view: teacher guidance is hidden and objects are locked. You can still annotate the slide.' : 'Teacher view: stage guidance and notes are visible.');
   requestAnimationFrame(resizeVisibleCanvases);
 }
 function setAudienceMode(enabled) {
+  if(enabled&&lesson.pages.length&&!stageIndices(true).length){setStatus('Show at least one slide in the lesson plan before presenting.');return;}
   document.body.classList.toggle('audience-mode',enabled);
   $('presentationBar').hidden=!enabled;
   if (enabled) {setAnnotation(false);$('exitPresentBtn').focus();} else $('audienceViewBtn').focus();
+  if(lesson.pages.length){renderOutline();if(studentMode()&&lesson.pages[currentPageIndex].hidden)goToStage(stageIndices(true)[0]);else showPage(currentPageIndex);}
+  syncDrawing();
   requestAnimationFrame(resizeVisibleCanvases);
 }
 function setDisplayMode(mode) {
@@ -484,113 +479,48 @@ function setDisplayMode(mode) {
   closeTools();requestAnimationFrame(resizeVisibleCanvases);
 }
 function syncDrawing() {
-  const studentView = document.body.classList.contains('preview-mode');
-  pageCanvases.forEach((canvas,index)=>{
-    canvas.classList.toggle('active',annotatorEnabled&&!studentView&&index===currentPageIndex);
-    canvasForAudience(index)?.classList.toggle('active',annotatorEnabled&&studentView&&index===currentPageIndex);
-  });
+  const presenting = document.body.classList.contains('audience-mode');
+  const preview = document.body.classList.contains('preview-mode');
+  boardEditor?.setMode({readonly:presenting || preview,preview,drawing:annotatorEnabled&&!presenting});
+  boardEditor?.setPen(selectedColor,selectedPenSize);
   $('drawingToolbar').hidden=!annotatorEnabled;
   $('boardPenBtn').classList.toggle('selected',annotatorEnabled);
   $('boardPenBtn').setAttribute('aria-pressed',String(annotatorEnabled));
   document.body.classList.toggle('annotation-active',annotatorEnabled);
   $('toggleAnnotatorBtn').textContent=annotatorEnabled?'Disable pen':'Enable pen';
   $('toggleAnnotatorBtn').setAttribute('aria-pressed',String(annotatorEnabled));
-  const state=annotationStateByPage[currentPageIndex];
-  $('quickUndoBtn').disabled=$('undoAnnotationBtn').disabled=!state?.strokes?.length;
-  $('quickRedoBtn').disabled=$('redoAnnotationBtn').disabled=!state?.redoStack?.length;
+  document.querySelectorAll('[data-editor-action]').forEach(button=>button.disabled=presenting||preview||button.dataset?.unavailable==='true');
+  $('selectionInspector').hidden=presenting||preview||!boardEditor?.selected();
 }
-function setAnnotation(enabled) {
-  annotatorEnabled=enabled;
-  syncDrawing();
-}
+function setAnnotation(enabled) {annotatorEnabled=enabled;syncDrawing();}
 function createColorSwatches() {
   ['colorSwatches','quickColors'].forEach(id=>{
     $(id).replaceChildren();
     penColors.forEach((color,index)=>{
-      const button=element('button','color-swatch');
-      button.type='button';button.style.background=color;button.title=colorNames[index];button.setAttribute('aria-label',`${colorNames[index]} pen`);
+      const button=element('button','color-swatch');button.type='button';button.style.background=color;
+      button.title=colorNames[index];button.setAttribute('aria-label',`${colorNames[index]} pen`);
       button.setAttribute('aria-pressed',String(color===selectedColor));button.classList.toggle('active',color===selectedColor);
-      button.addEventListener('click',()=>{selectedColor=color;createColorSwatches();});
+      button.addEventListener('click',()=>{selectedColor=color;createColorSwatches();boardEditor?.setPen(selectedColor,selectedPenSize);});
       $(id).append(button);
     });
   });
 }
-function canvasForAudience(index) {return $('audienceStage').children[index]?.querySelector('canvas');}
-function redrawCanvas(index,previewStroke) {
-  [pageCanvases[index],canvasForAudience(index)].filter(Boolean).forEach(canvas=>{
-    const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);
-    const strokes=[...list(annotationStateByPage[index]?.strokes),...(previewStroke?[previewStroke]:[])];
-    strokes.forEach(stroke=>{
-      if (!stroke.points.length) return;
-      ctx.strokeStyle=stroke.color;ctx.lineWidth=stroke.size;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();
-      const point=(p)=>stroke.normalized?{x:p.x*canvas.width,y:p.y*canvas.height}:p;
-      const first=point(stroke.points[0]);ctx.moveTo(first.x,first.y);
-      stroke.points.slice(1).forEach(p=>{const pos=point(p);ctx.lineTo(pos.x,pos.y);});
-      if(stroke.points.length===1) ctx.lineTo(first.x+.1,first.y+.1);
-      ctx.stroke();
-    });
-  });
+function undoStroke() {boardEditor?.undo();}
+function redoStroke() {boardEditor?.redo();}
+async function onPaste(event) {
+  if(event.target.closest('input,textarea,[contenteditable]')||$('toolsDialog').open)return;
+  try {await boardEditor.paste(event);}catch(error){setStatus(error.message);}
 }
-function resizeVisibleCanvases() {
-  [pageCanvases[currentPageIndex],canvasForAudience(currentPageIndex)].filter(Boolean).forEach(canvas=>{
-    const rect=canvas.parentElement.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    if (canvas.width!==Math.round(rect.width)||canvas.height!==Math.round(rect.height)) {canvas.width=Math.round(rect.width);canvas.height=Math.round(rect.height);}
+function renderResponseBoards() {
+  const host=$('responseBoards');host.replaceChildren();host.hidden=!miniWhiteboardsVisible;
+  if(!miniWhiteboardsVisible)return;
+  (roster.length?roster:['Response 1','Response 2','Response 3','Response 4']).slice(0,12).forEach((name,i)=>{
+    const card=element('div','mini-board-card');const label=element('label','',name);
+    const input=element('textarea');input.id=`response-${i}`;label.htmlFor=input.id;input.placeholder='Write a response…';
+    input.value=annotationStateByPage[currentPageIndex]?.responses?.[i]||'';
+    input.addEventListener('input',()=>{annotationStateByPage[currentPageIndex].responses ||= [];annotationStateByPage[currentPageIndex].responses[i]=input.value;queueSnapshot();});
+    card.append(label,input);host.append(card);
   });
-  redrawCanvas(currentPageIndex);
-}
-function attachDrawingEvents(canvas,index) {
-  let stroke;
-  const position=(event)=>{const rect=canvas.getBoundingClientRect();return {x:(event.clientX-rect.left)/rect.width,y:(event.clientY-rect.top)/rect.height};};
-  canvas.addEventListener('pointerdown',event=>{
-    if(!annotatorEnabled||!canvas.classList.contains('active')||index!==currentPageIndex||event.button!==0)return;
-    event.preventDefault();canvas.setPointerCapture(event.pointerId);
-    stroke={color:selectedColor,size:selectedPenSize,normalized:true,points:[position(event)]};redrawCanvas(index,stroke);
-  });
-  canvas.addEventListener('pointermove',event=>{if(!stroke)return;stroke.points.push(position(event));redrawCanvas(index,stroke);});
-  const finish=()=>{if(!stroke)return;annotationStateByPage[index].strokes.push(stroke);annotationStateByPage[index].redoStack=[];stroke=null;redrawCanvas(index);syncDrawing();persistSnapshot();};
-  canvas.addEventListener('pointerup',finish);canvas.addEventListener('pointercancel',finish);canvas.addEventListener('lostpointercapture',finish);
-}
-function undoStroke() {const state=annotationStateByPage[currentPageIndex];if(!state?.strokes.length)return;state.redoStack.push(state.strokes.pop());redrawCanvas(currentPageIndex);syncDrawing();persistSnapshot();}
-function redoStroke() {const state=annotationStateByPage[currentPageIndex];if(!state?.redoStack.length)return;state.strokes.push(state.redoStack.pop());redrawCanvas(currentPageIndex);syncDrawing();persistSnapshot();}
-function addImageElement(area,image,index,mode) {
-  const item=element('div','pasted-image-item');
-  Object.assign(item.style,{left:`${image.x}px`,top:`${image.y}px`,width:`${image.width}px`,height:`${image.height}px`});
-  const img=element('img','pasted-image');img.src=image.src;img.alt='Lesson visual';item.append(img);area.append(item);
-  area.style.minHeight=`${Math.max(parseFloat(area.style.minHeight)||200,image.y+image.height)}px`;
-  if(mode!=='teacher')return;
-  const handle=element('div','resize-handle');handle.setAttribute('aria-hidden','true');item.append(handle);
-  let drag;
-  item.addEventListener('pointerdown',event=>{
-    if(event.button!==0)return;event.preventDefault();
-    drag={resize:event.target===handle,startX:event.clientX,startY:event.clientY,x:image.x,y:image.y,width:image.width,height:image.height};item.setPointerCapture(event.pointerId);
-  });
-  item.addEventListener('pointermove',event=>{
-    if(!drag)return;
-    if(drag.resize){image.width=Math.min(area.clientWidth,Math.max(60,drag.width+event.clientX-drag.startX));image.height=Math.max(60,drag.height+event.clientY-drag.startY);}
-    else{image.x=Math.max(0,Math.min(area.clientWidth-image.width,drag.x+event.clientX-drag.startX));image.y=Math.max(0,drag.y+event.clientY-drag.startY);}
-    Object.assign(item.style,{left:`${image.x}px`,top:`${image.y}px`,width:`${image.width}px`,height:`${image.height}px`});
-    area.style.minHeight=`${Math.max(200,image.y+image.height)}px`;
-  });
-  const finish=()=>{if(!drag)return;drag=null;const audienceArea=$('audienceStage').children[index].querySelector('.pasted-images');audienceArea.replaceChildren();annotationStateByPage[index].images.forEach(visual=>addImageElement(audienceArea,visual,index,'audience'));audienceArea.style.minHeight=area.style.minHeight;persistSnapshot();};
-  item.addEventListener('pointerup',finish);item.addEventListener('pointercancel',finish);
-  area.style.minHeight=`${Math.max(parseFloat(area.style.minHeight)||200,image.y+image.height)}px`;
-}
-function onPaste(event) {
-  if(event.target.closest('input,textarea,[contenteditable]')||$('toolsDialog').open||document.body.classList.contains('audience-mode'))return;
-  const file=[...event.clipboardData?.items||[]].find(item=>item.type.startsWith('image/'))?.getAsFile();
-  if(!file)return;
-  event.preventDefault();
-  const index=currentPageIndex;const state=annotationStateByPage[index];
-  const reader=new FileReader();
-  reader.onload=()=>{
-    if(annotationStateByPage[index]!==state)return;
-    const image={src:reader.result,x:10,y:10,width:Math.min(220,$('teacherStage').clientWidth-60),height:160};
-    state.images ||= [];state.images.push(image);
-    [$('teacherStage'),$('audienceStage')].forEach((container,i)=>addImageElement(container.children[index].querySelector('.pasted-images'),image,index,i?'audience':'teacher'));
-    persistSnapshot();setStatus('Image added. Drag to move it, or drag its corner to resize.');
-  };
-  reader.readAsDataURL(file);
 }
 function showActivity(cardId,title,prompt) {
   [$('pollCard'),$('exitTicketCard'),$('coldCallCard')].forEach(card=>card.hidden=true);
@@ -619,77 +549,104 @@ function toggleMiniWhiteboards() {
   roster=$('studentRoster').value.split('\n').map(name=>name.trim()).filter(Boolean);
   miniWhiteboardsVisible=!miniWhiteboardsVisible;
   $('toggleMiniWhiteboardBtn').textContent=miniWhiteboardsVisible?'Hide response boards':'Show response boards';
-  buildPages();showPage(currentPageIndex);closeTools();persistSnapshot();
+  renderResponseBoards();closeTools();persistSnapshot();
 }
 function queueSnapshot() {clearTimeout(snapshotTimeout);snapshotTimeout=setTimeout(persistSnapshot,500);}
-function persistSnapshot() {
-  try {
-    localStorage.setItem(OFFLINE_SNAPSHOT_KEY,JSON.stringify({lesson,currentPageIndex,revealedAnswerCountByPage,annotationStateByPage,lessonJson:$('lessonJson').value,roster,miniWhiteboardsVisible}));
-    $('saveIndicator').textContent='Saved on this device';
-  }catch(error){
-    $('saveIndicator').textContent='Session not saved';
-    if(!saveWarningShown){setStatus('Your browser could not save this session. Keep this tab open to retain your work.');saveWarningShown=true;}
-  }
+function currentDocument() {
+  return {format:DOCUMENT_FORMAT,version:1,lesson:structuredClone(lesson),slides:boardEditor.documentSlides(),revealedAnswerCountByPage:[...revealedAnswerCountByPage],roster:[...roster]};
 }
-function restoreSnapshotIfAvailable() {
+async function persistSnapshot() {
+  if (!boardEditor || !lesson.pages.length) return;
+  const snapshot=structuredClone({document:currentDocument(),currentPageIndex,annotationStateByPage,lessonJson:$('lessonJson').value,miniWhiteboardsVisible});
+  $('saveIndicator').textContent='Saving…';
+  saveChain=saveChain.catch(()=>{}).then(()=>saveSession(snapshot));
+  try {await saveChain;$('saveIndicator').textContent='Saved on this device';}
+  catch(error){$('saveIndicator').textContent='Session not saved';setStatus('Your browser could not save this session. Use Save lesson to download an editable JSON backup.');}
+}
+async function restoreSnapshotIfAvailable() {
   try {
-    const saved=JSON.parse(localStorage.getItem(OFFLINE_SNAPSHOT_KEY)||'null');
-    if(!saved?.lesson?.pages?.length||saved.lesson.pages.some(page=>!Array.isArray(page.questions)))return false;
-    lesson=saved.lesson;
-    // Enrich snapshots from the original app with the stage metadata it discarded.
-    if(saved.lessonJson&&lesson.pages[0].instructions===undefined){
-      try{const enriched=parseLesson(saved.lessonJson);if(enriched.pages.length===lesson.pages.length)lesson=enriched;}catch{/* Keep the usable saved lesson. */}
+    const saved=await readSession();
+    if(saved?.document){
+      validateDocument(saved.document);initLesson(saved.document.lesson,saved.document.slides);
+      revealedAnswerCountByPage=lesson.pages.map((_,i)=>Number(saved.document.revealedAnswerCountByPage?.[i])||0);
+      roster=list(saved.document.roster);$('studentRoster').value=roster.join('\n');
+      annotationStateByPage=lesson.pages.map((_,i)=>({responses:list(saved.annotationStateByPage?.[i]?.responses)}));
+      miniWhiteboardsVisible=Boolean(saved.miniWhiteboardsVisible);
+      $('lessonJson').value=saved.lessonJson||$('lessonJson').value;
+      currentPageIndex=Math.max(0,Math.min(Number(saved.currentPageIndex)||0,lesson.pages.length-1));
+      showPage(currentPageIndex);$('timerMinutes').value=lesson.pages[currentPageIndex].durationMinutes||5;resetTimer();
+      persistSnapshot();setStatus('Your editable lesson and stage progress have been restored.');return true;
     }
-    $('lessonJson').value=saved.lessonJson||$('lessonJson').value;
-    revealedAnswerCountByPage=lesson.pages.map((_,i)=>Number(saved.revealedAnswerCountByPage?.[i])||0);
-    annotationStateByPage=lesson.pages.map((_,i)=>({strokes:list(saved.annotationStateByPage?.[i]?.strokes),redoStack:list(saved.annotationStateByPage?.[i]?.redoStack),images:list(saved.annotationStateByPage?.[i]?.images),responses:list(saved.annotationStateByPage?.[i]?.responses)}));
-    roster=list(saved.roster);$('studentRoster').value=roster.join('\n');miniWhiteboardsVisible=Boolean(saved.miniWhiteboardsVisible);
-    currentPageIndex=Math.max(0,Math.min(Number(saved.currentPageIndex)||0,lesson.pages.length-1));
-    renderOutline();buildPages();showPage(currentPageIndex);$('timerMinutes').value=lesson.pages[currentPageIndex].durationMinutes||5;resetTimer();
-    setStatus('Welcome back. Your lesson and stage progress have been restored.');return true;
+  }catch(error){setStatus('The saved session could not be restored. You can import a lesson file.');}
+  // Convert the previous HTML app's snapshot without removing the original backup.
+  try {
+    const old=JSON.parse(localStorage.getItem(OFFLINE_SNAPSHOT_KEY)||'null');
+    if(!old?.lesson?.pages?.length)return false;
+    const converted=old.lessonJson?parseLesson(old.lessonJson):old.lesson;
+    const slides=converted.pages.map(stageToSlide);initLesson(converted,slides);
+    for(let index=0;index<slides.length;index++){
+      for(const image of list(old.annotationStateByPage?.[index]?.images)){
+        slides[index].objects.push({type:'Image',version:'7.4.0',src:image.src,left:image.x||10,top:image.y||10,width:image.width||220,height:image.height||160,originX:'left',originY:'top'});
+      }
+    }
+    buildPages(slides);revealedAnswerCountByPage=converted.pages.map((_,i)=>old.revealedAnswerCountByPage?.[i]||0);
+    currentPageIndex=Math.max(0,Math.min(old.currentPageIndex||0,lesson.pages.length-1));showPage(currentPageIndex);
+    setStatus('Your previous lesson has been converted into editable slides.');return true;
   }catch{return false;}
 }
-function exportForPrint() {
-  closeTools();
-  const pages=[...$('teacherStage').children];
-  const displays=pages.map(page=>page.style.display);
-  const answerClasses=pages.map(page=>[...page.querySelectorAll('.answer')].map(answer=>answer.className));
-  const wasPresenting=document.body.classList.contains('audience-mode');const wasPreviewing=document.body.classList.contains('preview-mode');
-  document.body.classList.remove('audience-mode','preview-mode');
-  pages.forEach((page,index)=>{
-    page.style.display='block';page.classList.toggle('hide-annotation-on-print',!$('includeAnnotationsPrint').checked);
-    page.querySelectorAll('.answer').forEach((answer,i)=>answer.classList.toggle('hidden',!$('includeHiddenAnswersPrint').checked&&i>=(revealedAnswerCountByPage[index]||0)));
-    const canvas=pageCanvases[index];const rect=page.getBoundingClientRect();canvas.width=rect.width;canvas.height=rect.height;redrawCanvas(index);
-  });
-  const restore=()=>{
-    pages.forEach((page,index)=>{page.style.display=displays[index];page.classList.remove('hide-annotation-on-print');page.querySelectorAll('.answer').forEach((answer,i)=>answer.className=answerClasses[index][i]);});
-    document.body.classList.toggle('audience-mode',wasPresenting);document.body.classList.toggle('preview-mode',wasPreviewing);resizeVisibleCanvases();
-  };
-  window.addEventListener('afterprint',restore,{once:true});
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{try{window.print();}finally{restore();}}));
+async function exportForPrint() {
+  const indices=stageIndices(true);
+  if(!indices.length){setStatus('Show at least one slide in the lesson plan before exporting a PDF.');return;}
+  closeTools();$('exportPdfBtn').disabled=true;
+  try {
+    const images=await boardEditor.imagesForPrint({allAnswers:$('includeHiddenAnswersPrint').checked,annotations:$('includeAnnotationsPrint').checked,counts:revealedAnswerCountByPage,indices});
+    const printArea=$('printSlides');printArea.replaceChildren();
+    const ready=images.map((src,index)=>{const image=element('img');image.src=src;image.alt=lesson.pages[indices[index]].title;printArea.append(image);return image.decode();});
+    await Promise.all(ready);window.print();
+  }catch(error){setStatus('Could not export this lesson: '+error.message);}
+  finally{$('exportPdfBtn').disabled=false;}
+}
+async function saveLessonFile(compact=false) {
+  $('saveLessonBtn').disabled=true;
+  try {
+    const doc=currentDocument();validateDocument(doc);
+    const blob=compact?await packLesson(doc):new Blob([JSON.stringify(doc,null,2)],{type:'application/json'});
+    downloadBlob(blob,`${lesson.title.replace(/[^a-z0-9]+/gi,'-').slice(0,60)||'lesson'}.${compact?'zip':'json'}`);
+    setStatus('Editable lesson downloaded. Reopen it using Import lesson in this app.');
+  }
+  catch(error){setStatus('Could not save the lesson file: '+error.message);}
+  finally{$('saveLessonBtn').disabled=false;}
 }
 async function loadLesson() {
-  $('importError').hidden=true;
-  try{await ensureSchemaLoaded();const parsed=parseLesson($('lessonJson').value);initLesson(parsed);closeTools();}
-  catch(error){$('importError').textContent=error.message;$('importError').hidden=false;}
+  $('importError').hidden=true;$('loadLessonBtn').disabled=true;
+  try{
+    const input=pendingLessonFile?await unpackLesson(pendingLessonFile):JSON.parse($('lessonJson').value);
+    if(input?.format===DOCUMENT_FORMAT){validateDocument(input);initLesson(input.lesson,input.slides);roster=list(input.roster);$('studentRoster').value=roster.join('\n');revealedAnswerCountByPage=lesson.pages.map((_,i)=>Number(input.revealedAnswerCountByPage?.[i])||0);syncAnswers();persistSnapshot();}
+    else {await ensureSchemaLoaded();initLesson(parseLesson($('lessonJson').value));}
+    pendingLessonFile=null;closeTools();
+  }catch(error){$('importError').textContent=error.message;$('importError').hidden=false;}
+  finally{$('loadLessonBtn').disabled=false;}
+}
+function addStage(duplicate=false) {
+  const page=duplicate?structuredClone(lesson.pages[currentPageIndex]):{stageId:crypto.randomUUID(),title:'Untitled slide',stageType:'Activity',durationMinutes:5,questions:[],instructions:[],content:'',teacherNotes:[]};
+  page.stageId=crypto.randomUUID();page.hidden=false;if(duplicate)page.title+=' (copy)';
+  boardEditor.snapshot();const slides=boardEditor.documentSlides();
+  const scene=duplicate?structuredClone(slides[currentPageIndex]):stageToSlide(page);
+  if(duplicate)scene.objects.forEach(object=>{if(object.lpRole==='title')object.text=page.title;});
+  const index=currentPageIndex+1;lesson.pages.splice(index,0,page);slides.splice(index,0,scene);revealedAnswerCountByPage.splice(index,0,0);annotationStateByPage.splice(index,0,{responses:[]});
+  boardEditor.setLesson(slides);renderOutline();showPage(index);$('timerMinutes').value=page.durationMinutes;resetTimer();persistSnapshot();
+}
+function renderSelection(selection) {
+  $('selectionInspector').hidden=!selection||boardEditor.readonly;
+  if(!selection)return;
+  $('selectedType').textContent=selection.type;
+  $('textFormatting').hidden=!selection.text;
+  $('objectColor').value=/^#[0-9a-f]{6}$/i.test(selection.fill)?selection.fill:'#244d40';
+  if(selection.text){$('objectFontSize').value=Math.round(selection.fontSize);$('objectFontFamily').value=selection.fontFamily;$('objectBold').setAttribute('aria-pressed',String(selection.fontWeight==='bold'));$('objectItalic').setAttribute('aria-pressed',String(selection.fontStyle==='italic'));$('objectAlign').value=selection.textAlign;}
 }
 $('lessonJson').value=JSON.stringify(sampleLesson,null,2);
-$('lessonPlanToggle').addEventListener('click',()=>{
-  if (lessonPanelState.pinned) closeLessonPanel();
-  else setLessonPanel({pinned:true});
-});
-$('closeLessonPlanBtn').addEventListener('click',closeLessonPanel);
-$('lessonNavigation').addEventListener('pointerenter',event=>{
-  if (event.pointerType === 'mouse') setLessonPanel({hovered:true});
-});
-$('lessonNavigation').addEventListener('pointerleave',()=>setLessonPanel({hovered:false}));
-$('lessonOutline').addEventListener('focusin',()=>setLessonPanel({focused:true}));
-$('lessonOutline').addEventListener('focusout',event=>{
-  if (!$('lessonOutline').contains(event.relatedTarget)) setLessonPanel({focused:false});
-});
-document.addEventListener('click',event=>{
-  if (!$('lessonNavigation').contains(event.target)) setLessonPanel({pinned:false,hovered:false,focused:false});
-});
+bindSidebar({navigation:'lessonNavigation',panel:'lessonOutline',toggle:'lessonPlanToggle',close:'closeLessonPlanBtn',state:lessonPanelState,set:setLessonPanel,hide:closeLessonPanel});
+bindSidebar({navigation:'teachingNavigation',panel:'teacherPanel',toggle:'teacherPanelToggle',close:'closeTeacherPanelBtn',state:guidancePanelState,set:setGuidancePanel,hide:closeGuidancePanel});
 $('importBtn').addEventListener('click',()=>openTools('section-lesson'));
 $('closeDialogBtn').addEventListener('click',closeTools);
 $('toolsDialog').addEventListener('close',()=>dialogOpener?.focus());
@@ -697,14 +654,16 @@ $('toolsDialog').addEventListener('click',event=>{if(event.target===$('toolsDial
 $('shortcutsBtn').addEventListener('click',()=>openTools('section-shortcuts'));
 $('penSettingsBtn').addEventListener('click',()=>openTools('section-annotator'));
 $('loadLessonBtn').addEventListener('click',loadLesson);
-$('sampleLessonBtn').addEventListener('click',()=>{$('lessonJson').value=JSON.stringify(sampleLesson,null,2);$('importError').hidden=true;});
+$('sampleLessonBtn').addEventListener('click',()=>{pendingLessonFile=null;$('lessonJson').value=JSON.stringify(sampleLesson,null,2);$('importError').hidden=true;});
 $('lessonFile').addEventListener('change',async event=>{
   const file=event.target.files[0];if(!file)return;
-  try{$('lessonJson').value=await file.text();$('importError').hidden=true;setStatus(`${file.name} is ready to load.`);}catch{$('importError').textContent='This file could not be read. Try pasting the JSON instead.';$('importError').hidden=false;}
-  event.target.value='';
+  if(/\.(lesson|zip)$/i.test(file.name)){pendingLessonFile=file;$('lessonJson').value='';$('lessonJson').placeholder=`${file.name} — editable lesson package ready to load`;}
+  else{pendingLessonFile=null;try{$('lessonJson').value=await file.text();}catch{$('importError').textContent='This file could not be read.';$('importError').hidden=false;event.target.value='';return;}}
+  $('importError').hidden=true;setStatus(`${file.name} is ready to load.`);event.target.value='';
 });
+$('lessonJson').addEventListener('input',()=>pendingLessonFile=null);
 document.querySelectorAll('.tool-launch[data-target]').forEach(button=>button.addEventListener('click',()=>openTools(button.dataset.target)));
-$('nextBtn').addEventListener('click',()=>goToStage(currentPageIndex+1));$('prevBtn').addEventListener('click',()=>goToStage(currentPageIndex-1));
+$('nextBtn').addEventListener('click',()=>navigateStage(1));$('prevBtn').addEventListener('click',()=>navigateStage(-1));
 $('presentationNextBtn').addEventListener('click',()=>$('nextBtn').click());$('presentationPrevBtn').addEventListener('click',()=>$('prevBtn').click());
 $('revealAnswerBtn').addEventListener('click',revealNextAnswer);$('presentationRevealBtn').addEventListener('click',revealNextAnswer);
 $('hideAnswersBtn').addEventListener('click',()=>{revealedAnswerCountByPage[currentPageIndex]=0;syncAnswers();persistSnapshot();});
@@ -714,28 +673,63 @@ $('audienceViewBtn').addEventListener('click',()=>setAudienceMode(true));$('exit
 ['board','tablet','standard'].forEach(mode=>$(mode+'ModeBtn').addEventListener('click',()=>setDisplayMode(mode)));
 $('boardPenBtn').addEventListener('click',()=>setAnnotation(!annotatorEnabled));
 $('toggleAnnotatorBtn').addEventListener('click',()=>{setAnnotation(!annotatorEnabled);closeTools();});$('finishDrawingBtn').addEventListener('click',()=>setAnnotation(false));
-$('penSize').addEventListener('input',()=>{selectedPenSize=Number($('penSize').value);$('penSizeValue').textContent=`${selectedPenSize} px`;});
+$('penSize').addEventListener('input',()=>{selectedPenSize=Number($('penSize').value);$('penSizeValue').textContent=`${selectedPenSize} px`;boardEditor?.setPen(selectedColor,selectedPenSize);});
 $('undoAnnotationBtn').addEventListener('click',undoStroke);$('quickUndoBtn').addEventListener('click',undoStroke);$('redoAnnotationBtn').addEventListener('click',redoStroke);$('quickRedoBtn').addEventListener('click',redoStroke);
-$('clearPageAnnotationBtn').addEventListener('click',()=>{const state=annotationStateByPage[currentPageIndex];if(!state)return;state.redoStack.push(...state.strokes.reverse());state.strokes=[];redrawCanvas(currentPageIndex);syncDrawing();persistSnapshot();});
+$('clearPageAnnotationBtn').addEventListener('click',()=>boardEditor.clearAnnotations());
 $('launchPollBtn').addEventListener('click',launchPoll);$('showExitTicketBtn').addEventListener('click',showExitTicket);$('coldCallBtn').addEventListener('click',coldCallStudent);$('toggleMiniWhiteboardBtn').addEventListener('click',toggleMiniWhiteboards);
 $('studentRoster').addEventListener('input',()=>{roster=$('studentRoster').value.split('\n').map(name=>name.trim()).filter(Boolean);queueSnapshot();});
 $('closeActivityBtn').addEventListener('click',()=>$('participationHub').hidden=true);
 $('exportPdfBtn').addEventListener('click',exportForPrint);
 document.addEventListener('paste',onPaste);
 document.addEventListener('keydown',event=>{
-  if(event.key==='Escape'&&!$('toolsDialog').open){if(document.body.classList.contains('lesson-plan-open')){closeLessonPanel();return;}if(document.body.classList.contains('audience-mode'))setAudienceMode(false);else setAnnotation(false);return;}
-  if(event.target.closest('input,textarea,select,[contenteditable]')||$('toolsDialog').open||event.ctrlKey||event.metaKey||event.altKey)return;
-  if(event.key==='ArrowRight'){event.preventDefault();goToStage(currentPageIndex+1);}
-  if(event.key==='ArrowLeft'){event.preventDefault();goToStage(currentPageIndex-1);}
+  if(event.key==='Escape'&&!$('toolsDialog').open){if(document.body.classList.contains('lesson-plan-open')||document.body.classList.contains('teacher-panel-open')){closeLessonPanel();closeGuidancePanel();return;}if(document.body.classList.contains('audience-mode'))setAudienceMode(false);else setAnnotation(false);return;}
+  if(event.target.closest('input,textarea,select,[contenteditable]')||$('toolsDialog').open||boardEditor.selected()?.isEditing)return;
+  if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();saveLessonFile();return;}
+  if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){event.preventDefault();event.shiftKey?redoStroke():undoStroke();return;}
+  if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='c'&&boardEditor.selected()){event.preventDefault();boardEditor.copySelection().catch(()=>setStatus('Copy is unavailable in this browser. Use Duplicate instead.'));return;}
+  if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='d'){event.preventDefault();boardEditor.duplicateSelection();return;}
+  if(event.ctrlKey||event.metaKey||event.altKey)return;
+  if((event.key==='Delete'||event.key==='Backspace')&&boardEditor.selected()){event.preventDefault();boardEditor.deleteSelection();return;}
+  if(boardEditor.selected()&&!boardEditor.readonly&&event.key.startsWith('Arrow')){event.preventDefault();const object=boardEditor.selected();const step=event.shiftKey?10:1;boardEditor.updateSelected({left:object.left+(event.key==='ArrowRight'?step:event.key==='ArrowLeft'?-step:0),top:object.top+(event.key==='ArrowDown'?step:event.key==='ArrowUp'?-step:0)});return;}
+  if(event.key==='ArrowRight'){event.preventDefault();navigateStage(1);}
+  if(event.key==='ArrowLeft'){event.preventDefault();navigateStage(-1);}
   if(event.key.toLowerCase()==='r'){event.preventDefault();revealNextAnswer();}
   if(event.key.toLowerCase()==='a'&&!document.body.classList.contains('audience-mode')){event.preventDefault();setAnnotation(!annotatorEnabled);}
 });
 function syncOfflineBanner() {$('offlineBanner').hidden=navigator.onLine;}
 window.addEventListener('online',syncOfflineBanner);window.addEventListener('offline',syncOfflineBanner);
 window.addEventListener('pagehide',()=>{if(lesson.pages.length)persistSnapshot();});
+boardEditor=new SlideEditor($('teacherStage'),{
+  onChange:queueSnapshot,onSelection:renderSelection,
+  onHistory:state=>{['undoAnnotationBtn','quickUndoBtn','editorUndoBtn'].forEach(id=>$(id).disabled=!state.undo);['redoAnnotationBtn','quickRedoBtn','editorRedoBtn'].forEach(id=>$(id).disabled=!state.redo);},
+  onError:setStatus,onTitleChange:(index,title)=>{if(lesson.pages[index]&&lesson.pages[index].title!==title){lesson.pages[index].title=title;renderOutline();$('stageBreadcrumb').textContent=title;}}
+});
+$('saveLessonBtn').addEventListener('click',()=>saveLessonFile());
+$('saveCompactBtn').addEventListener('click',()=>saveLessonFile(true));
+$('addStageBtn').addEventListener('click',()=>addStage(false));$('duplicateStageBtn').addEventListener('click',()=>addStage(true));
+$('addTextBtn').addEventListener('click',()=>{setAnnotation(false);boardEditor.addText();});
+$('addShapeBtn').addEventListener('click',()=>openTools('section-shapes'));
+$('addStickerBtn').addEventListener('click',()=>openTools('section-stickers'));
+$('addVideoBtn').addEventListener('click',()=>openTools('section-video'));
+$('insertVideoBtn').addEventListener('click',()=>{try{boardEditor.addVideo($('youtubeUrl').value);$('videoError').hidden=true;closeTools();}catch(error){$('videoError').hidden=false;$('videoError').textContent=error.message;}});
+$('addImageBtn').addEventListener('click',()=>$('imageFile').click());
+$('imageFile').addEventListener('change',async event=>{const file=event.target.files[0];if(file){try{await boardEditor.addImage(file);}catch(error){setStatus(error.message);}}event.target.value='';});
+$('teacherStage').addEventListener('dragover',event=>{if(!boardEditor.readonly)event.preventDefault();});
+$('teacherStage').addEventListener('drop',async event=>{if(boardEditor.readonly)return;event.preventDefault();const file=event.dataTransfer.files[0];if(file){try{await boardEditor.addImage(file);}catch(error){setStatus(error.message);}}});
+document.querySelectorAll('[data-shape]').forEach(button=>button.addEventListener('click',()=>{boardEditor.addShape(button.dataset.shape);closeTools();}));
+document.querySelectorAll('[data-sticker]').forEach(button=>button.addEventListener('click',()=>{boardEditor.addSticker(button.dataset.sticker);closeTools();}));
+$('editorUndoBtn').addEventListener('click',undoStroke);$('editorRedoBtn').addEventListener('click',redoStroke);
+$('objectColor').addEventListener('input',()=>boardEditor.updateSelected({fill:$('objectColor').value}));
+$('objectFontSize').addEventListener('change',()=>boardEditor.updateSelected({fontSize:Math.min(200,Math.max(8,Number($('objectFontSize').value)||36))}));
+$('objectFontFamily').addEventListener('change',()=>boardEditor.updateSelected({fontFamily:$('objectFontFamily').value}));
+$('objectBold').addEventListener('click',()=>boardEditor.updateSelected({fontWeight:boardEditor.selected()?.fontWeight==='bold'?'normal':'bold'}));
+$('objectItalic').addEventListener('click',()=>boardEditor.updateSelected({fontStyle:boardEditor.selected()?.fontStyle==='italic'?'normal':'italic'}));
+$('objectAlign').addEventListener('change',()=>boardEditor.updateSelected({textAlign:$('objectAlign').value}));
+$('duplicateObjectBtn').addEventListener('click',()=>boardEditor.duplicateSelection());$('deleteObjectBtn').addEventListener('click',()=>boardEditor.deleteSelection());
+$('objectForwardBtn').addEventListener('click',()=>boardEditor.moveLayer(true));$('objectBackwardBtn').addEventListener('click',()=>boardEditor.moveLayer(false));
 (async()=>{
   createColorSwatches();syncOfflineBanner();
-  try{await ensureSchemaLoaded();if(!restoreSnapshotIfAvailable())initLesson(parseLesson($('lessonJson').value));}
+  try{await ensureSchemaLoaded();if(!await restoreSnapshotIfAvailable())initLesson(parseLesson($('lessonJson').value));}
   catch(error){setStatus(`Could not start: ${error.message}`);}
-  if('serviceWorker'in navigator)navigator.serviceWorker.register('./service-worker.js').catch(()=>setStatus('Offline app caching is unavailable. Your lesson can still save on this device.'));
+  if(import.meta.env.PROD&&'serviceWorker'in navigator)navigator.serviceWorker.register('./service-worker.js').catch(()=>setStatus('Offline app caching is unavailable. Your lesson can still save on this device.'));
 })();

@@ -232,6 +232,20 @@ a {
   flex-direction:column;
   gap:9px
 }
+.stage-row {border:1px solid var(--border,#e0e5da);border-radius:10px;background:#fff;}
+.stage-row[hidden] {display:none;}
+.stage-tools {display:flex;align-items:center;gap:6px;padding:0 10px 9px;}
+.stage-action {min-width:30px;min-height:30px;border:1px solid #e0e5da;border-radius:6px;background:#f6f7f2;color:var(--ink,#27352d);font-size:12px;}
+.stage-action:last-child {margin-left:auto;padding:0 10px;}
+.stage-action:hover:not(:disabled) {background:#edf3e8;border-color:#89af91;}
+.stage-action:disabled {opacity:.35;cursor:default;}
+.stage-drag-handle {cursor:grab;color:#7a8774;font-size:22px;margin-right:4px;}
+.stage-hidden .stage-info {opacity:.65;}
+.stage-hidden {border-style:dashed;}
+.stage-row.dragging {opacity:.5;}
+.stage-row.drop-target {outline:2px solid var(--green);outline-offset:2px;}
+.preview-mode .stage-tools,.audience-mode .stage-tools {display:none;}
+.outline-helper {font-size:11px;color:var(--muted);line-height:1.5;margin:0 0 10px;}
 .stage-item {
   display:flex;
   gap:11px;
@@ -1683,4 +1697,244 @@ body.audience-mode .lesson-navigation {
   .lesson-navigation {
     display: none !important;
   }
+}
+/* Shared 16:9 Fabric canvas. Preview and presentation use the same scene. */
+#teacherStage.fabric-board,
+body.preview-mode #teacherStage.fabric-board,
+body.audience-mode #teacherStage.fabric-board {
+  display: block;
+  position: relative;
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: 10px;
+  box-shadow: 0 4px 18px #244d4015;
+  background: #fffefb;
+}
+.fabric-board[aria-busy="true"] {
+  opacity: .65;
+  pointer-events: none;
+}
+#audienceStage {
+  display: none !important;
+}
+.media-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.video-object {
+  position: absolute;
+  overflow: hidden;
+  border-radius: 6px;
+}
+.video-object iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.video-poster {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  color: white;
+  background: #223d34;
+  font-size: clamp(10px, 1.8vw, 20px);
+}
+.video-poster span {
+  font-size: .6em;
+}
+.selection-inspector {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #d3dfc9;
+  border-radius: 9px;
+  background: #fff;
+  margin-bottom: 10px;
+  min-height: 48px;
+}
+.selection-inspector > span {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+.text-formatting {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.selection-inspector select,
+.selection-inspector input:not([type="color"]) {
+  width: auto;
+  max-width: 130px;
+  font-size: 11px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.selection-inspector #objectFontSize {
+  width: 60px;
+}
+.inspector-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 10px;
+}
+.selection-inspector input[type="color"] {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  padding: 0;
+}
+.selection-inspector .icon-button {
+  min-width: 29px;
+  min-height: 29px;
+  font-size: 14px;
+}
+.selection-inspector [aria-pressed="true"] {
+  background: #edf3e8;
+}
+.insert-tools {
+  display: flex;
+  gap: 7px;
+  padding-bottom: 10px;
+  flex-wrap: wrap;
+}
+.insert-tools .tool-launch {
+  flex: 1;
+  flex-direction: row;
+  justify-content: center;
+  padding: 9px 8px;
+}
+.insert-tools .tool-launch > span {
+  font-size: 17px;
+}
+.slide-actions {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+.slide-actions .button {
+  flex: 1;
+  font-size: 10px;
+  padding: 8px;
+  min-height: 34px;
+}
+.sticker-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.sticker-options button {
+  font-size: 35px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fafbf7;
+  padding: 20px;
+}
+.shape-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+#printSlides {
+  display: none;
+}
+body.audience-mode .selection-inspector,
+body.audience-mode #responseBoards {
+  display: none !important;
+}
+@media (max-width: 680px) {
+  .insert-tools .tool-launch {
+    font-size: 9px;
+    padding: 8px 5px;
+  }
+  .header-actions {
+    flex-wrap: wrap;
+  }
+}
+@media print {
+  @page { size: landscape; margin: 10mm; }
+  body > :not(#printSlides) {
+    display: none !important;
+  }
+  #printSlides {
+    display: block;
+  }
+  #printSlides img {
+    display: block;
+    width: 100%;
+    height: auto;
+    break-after: page;
+    break-inside: avoid;
+  }
+  #printSlides img:last-child {
+    break-after: auto;
+  }
+}
+.canvas-accessibility {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: pre-wrap;
+}
+.board-dock .selection-inspector {
+  margin: 0 0 10px;
+  padding: 8px;
+  background: #f8faf4;
+}
+
+/* Matching hover previews and pinned sidebars leave the canvas at a stable width. */
+.app-shell {grid-template-columns:48px minmax(0,1fr) 48px;}
+.workspace-grid,body.board-mode .workspace-grid {grid-template-columns:minmax(0,1fr);}
+.teaching-navigation {position:sticky;top:0;align-self:start;height:calc(100dvh - 82px);min-height:220px;background:#fff;border-left:1px solid var(--line);z-index:15;}
+.teacher-panel-toggle {display:flex;flex-direction:column;align-items:center;gap:15px;width:47px;min-height:150px;padding:22px 10px;border:0;background:transparent;color:var(--green);}
+.teacher-panel-toggle>span:first-child {font-size:19px;}
+.teacher-panel-toggle>span:last-child {writing-mode:vertical-rl;font-size:11px;font-weight:600;letter-spacing:1px;}
+.teacher-panel-toggle:hover,.teacher-panel-toggle[aria-expanded="true"] {background:#edf3e8;}
+.teacher-panel-toggle[aria-pressed="true"],.lesson-plan-toggle[aria-pressed="true"] {box-shadow:inset 0 -3px var(--green);}
+.teaching-navigation .teaching-sidebar,body.board-mode .teaching-navigation .teaching-sidebar {position:absolute;inset:0 47px 0 auto;display:flex;flex-direction:column;width:min(310px,calc(100vw - 96px));height:100%;padding:20px 16px;overflow-y:auto;background:#fff;border:1px solid var(--line);border-top:0;box-shadow:-14px 12px 30px #244d4018;visibility:hidden;opacity:0;transform:translateX(8px);transition:opacity 140ms ease,transform 140ms ease,visibility 140ms;}
+body.teacher-panel-open .teaching-navigation .teaching-sidebar {visibility:visible;opacity:1;transform:translateX(0);}
+.teaching-navigation .sidebar-heading {margin-bottom:0;gap:8px;}
+.teaching-navigation .sidebar-heading .eyebrow {margin-right:auto;}
+.teaching-navigation .next-up {display:block;}
+#closeTeacherPanelBtn {min-width:25px;min-height:25px;font-size:19px;border:0;}
+body.preview-mode .teaching-navigation,body.audience-mode .teaching-navigation {display:none;}
+body.preview-mode .app-shell {grid-template-columns:48px minmax(0,1fr);}
+body.audience-mode .app-shell {grid-template-columns:minmax(0,1fr);}
+@media(prefers-reduced-motion:reduce) {.lesson-navigation .lesson-sidebar,.teaching-navigation .teaching-sidebar {transition:none;}}
+@media print {.teaching-navigation {display:none!important;}}
+
+/* Pinning reserves a grid column; hovering keeps a temporary overlay. */
+.app-shell {--lesson-panel-width:clamp(190px,22vw,282px);--teacher-panel-width:clamp(200px,24vw,310px);--left-sidebar-space:48px;--right-sidebar-space:48px;grid-template-columns:var(--left-sidebar-space) minmax(0,1fr) var(--right-sidebar-space);}
+body.lesson-plan-pinned .app-shell {--left-sidebar-space:calc(48px + var(--lesson-panel-width));}
+body.teacher-panel-pinned .app-shell {--right-sidebar-space:calc(48px + var(--teacher-panel-width));}
+.lesson-navigation .lesson-sidebar {width:var(--lesson-panel-width);}
+.teaching-navigation .teaching-sidebar,body.board-mode .teaching-navigation .teaching-sidebar {width:var(--teacher-panel-width);}
+.teacher-panel-toggle {margin-left:auto;}
+body.lesson-plan-pinned .lesson-sidebar,body.teacher-panel-pinned .teaching-sidebar {box-shadow:none;}
+body.preview-mode .app-shell {grid-template-columns:var(--left-sidebar-space) minmax(0,1fr);}
+body.audience-mode .app-shell {grid-template-columns:minmax(0,1fr);}
+.workspace-heading {flex-wrap:wrap;}
+@media(max-width:680px) {
+  .app-shell {display:flex;flex-direction:column;}
+  .lesson-navigation,.teaching-navigation {position:relative;top:auto;width:100%;height:auto;min-height:48px;display:flex;border:0;border-bottom:1px solid var(--line);}
+  .lesson-navigation {order:0;}
+  .workspace {order:1;}
+  .teaching-navigation {order:2;}
+  .lesson-plan-toggle,.teacher-panel-toggle {width:48px;min-height:48px;height:48px;padding:12px;gap:0;margin:0;}
+  .lesson-plan-toggle>span:last-child,.teacher-panel-toggle>span:last-child {display:none;}
+  .lesson-navigation .lesson-sidebar,.teaching-navigation .teaching-sidebar,body.board-mode .teaching-navigation .teaching-sidebar {inset:0 auto auto 48px;width:calc(100vw - 48px);height:auto;max-height:55dvh;}
+  body.lesson-plan-pinned .lesson-navigation .lesson-sidebar,body.teacher-panel-pinned .teaching-navigation .teaching-sidebar {position:relative;inset:auto;width:calc(100% - 48px);height:auto;}
 }

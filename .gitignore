@@ -21,3 +21,15 @@ Desktop.ini
 *.tmp
 *.temp
 __pycache__/
+
+# JavaScript dependencies and build artifacts
+node_modules/
+dist/
+.vite/
+coverage/
+playwright-report/
+test-results/
+
+# Local tooling settings
+.pnpm-store/
+.env.local
