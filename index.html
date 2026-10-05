@@ -3,118 +3,65 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Lesson Presenter</title>
-  <link rel="stylesheet" href="styles.css" />
+  <meta name="theme-color" content="#244d40" />
+  <title>Lesson Presenter · Teaching workspace</title>
+  <link rel="stylesheet" href="styles.css?v=3" />
 </head>
 <body>
-  <div id="offlineBanner" class="offline-banner" hidden>
-    Offline mode: using cached app + last saved lesson state.
-  </div>
-
+  <div id="offlineBanner" class="offline-banner" hidden>You're offline. Your lesson is saved on this device.</div>
+  <a class="skip-link" href="#teacherStage">Skip to lesson</a>
+  <header class="app-header">
+    <a class="brand" href="./" aria-label="Lesson Presenter home"><span class="brand-mark" aria-hidden="true">lp<span>•</span></span><span>lesson<span class="brand-light">presenter</span></span></a>
+    <div class="workspace-label">YOUR TEACHING WORKSPACE</div>
+    <div class="header-actions"><span id="saveIndicator" class="save-indicator">Saved on this device</span><button id="importBtn" class="button secondary">＋ Import lesson</button><button id="audienceViewBtn" class="button primary"><span aria-hidden="true">▷</span> Present</button></div>
+  </header>
   <div class="app-shell">
-    <aside class="panel" id="controlPanel">
-      <div class="panel-topbar">
-        <h1>Delivery</h1>
-        <div class="panel-topbar-actions">
-          <button id="panelPositionBtn" class="ghost-btn" type="button" title="Dock below presentation">Dock: Side</button>
-          <button id="togglePanelMinimizeBtn" class="ghost-btn" type="button" title="Minimize panel">Minimize</button>
-        </div>
-      </div>
-
-      <nav class="panel-toolbar" aria-label="Quick tools">
-        <button type="button" class="toolbar-btn active" data-target="section-lesson" title="Lesson">🧾</button>
-        <button type="button" class="toolbar-btn" data-target="section-presentation" title="Presentation">🎬</button>
-        <button type="button" class="toolbar-btn" data-target="section-timer" title="Timer">⏱️</button>
-        <button type="button" class="toolbar-btn" data-target="section-annotator" title="Annotator">✏️</button>
-        <button type="button" class="toolbar-btn" data-target="section-view" title="View">🖥️</button>
-        <button type="button" class="toolbar-btn" data-target="section-participation" title="Participation">👥</button>
-        <button type="button" class="toolbar-btn" data-target="section-export" title="Export">📄</button>
-      </nav>
-
-      <div id="panelContent" class="panel-content">
-        <section id="section-lesson" class="controls feature-section active">
-          <h2>Lesson</h2>
-          <label for="lessonJson">Lesson JSON</label>
-          <textarea id="lessonJson" spellcheck="false"></textarea>
-          <button id="loadLessonBtn">Load Lesson</button>
-        </section>
-
-        <section id="section-presentation" class="controls feature-section">
-          <h2>Presentation</h2>
-          <button id="prevBtn">Previous Page</button>
-          <button id="nextBtn">Next Page</button>
-          <button id="revealAnswerBtn">Reveal Next Answer</button>
-          <label for="stageJump">Jump to stage</label>
-          <select id="stageJump"></select>
-        </section>
-
-        <section id="section-timer" class="controls feature-section">
-          <h2>Timer</h2>
-          <div class="timer-readout" id="timerReadout">00:00</div>
-          <label for="timerMinutes">Minutes</label>
-          <input id="timerMinutes" type="number" min="1" max="180" value="5" />
-          <button id="startTimerBtn">Start / Restart</button>
-          <button id="pauseTimerBtn">Pause</button>
-          <button id="resetTimerBtn">Reset</button>
-        </section>
-
-        <section id="section-annotator" class="controls feature-section">
-          <h2>Annotator</h2>
-          <label>Pen Color</label>
-          <div class="color-swatches" id="colorSwatches"></div>
-
-          <label for="penSize">Pen Size</label>
-          <input id="penSize" type="range" min="2" max="20" value="4" />
-          <span id="penSizeValue">4 px</span>
-
-          <button id="toggleAnnotatorBtn">Enable Annotator</button>
-          <button id="undoAnnotationBtn">Undo Annotation Stroke</button>
-          <button id="redoAnnotationBtn">Redo Annotation Stroke</button>
-          <button id="clearPageAnnotationBtn">Clear Current Page Annotation</button>
-        </section>
-
-        <section id="section-view" class="controls feature-section">
-          <h2>View Mode</h2>
-          <button id="presenterViewBtn">Teacher View</button>
-          <button id="audienceViewBtn">Audience View</button>
-          <button id="boardModeBtn">Board Mode</button>
-          <button id="tabletModeBtn">Tablet Mode</button>
-        </section>
-
-        <section id="section-participation" class="controls feature-section">
-          <h2>Live Participation</h2>
-          <label for="pollQuestion">Poll question</label>
-          <input id="pollQuestion" type="text" placeholder="Type a quick poll" />
-          <button id="launchPollBtn">Launch Poll</button>
-          <label for="exitTicketPrompt">Exit ticket prompt</label>
-          <input id="exitTicketPrompt" type="text" placeholder="One thing you learned..." />
-          <button id="showExitTicketBtn">Show Exit Ticket</button>
-          <button id="coldCallBtn">Cold-call Student</button>
-          <button id="toggleMiniWhiteboardBtn">Toggle Mini Whiteboards</button>
-        </section>
-
-        <section id="section-export" class="controls feature-section">
-          <h2>Export</h2>
-          <label><input id="includeAnnotationsPrint" type="checkbox" checked /> Include annotations in print</label>
-          <label><input id="includeHiddenAnswersPrint" type="checkbox" checked /> Reveal all answers in print</label>
-          <button id="exportPdfBtn">Print / Export PDF</button>
-        </section>
-      </div>
+    <div id="lessonNavigation" class="lesson-navigation">
+      <button id="lessonPlanToggle" class="lesson-plan-toggle" aria-expanded="false" aria-controls="lessonOutline" title="Hover to preview, click to keep open"><span aria-hidden="true">☰</span><span>Lesson plan</span></button>
+    <aside id="lessonOutline" class="lesson-sidebar" aria-label="Lesson outline" inert>
+      <div class="sidebar-heading"><span class="eyebrow">LESSON PLAN</span><span class="small-badge" id="stageCount">2 stages</span><button id="closeLessonPlanBtn" class="icon-button" aria-label="Close lesson plan">×</button></div>
+      <h1 id="lessonTitle"></h1>
+      <div id="lessonMeta" class="lesson-meta"></div>
+      <div class="sidebar-divider"></div>
+      <div class="outline-heading"><h2>Lesson flow</h2><span id="outlineDuration"></span></div>
+      <nav id="stageList" class="stage-list" aria-label="Stages"></nav>
+      <div class="lesson-goal"><span class="eyebrow">THE BIG PICTURE</span><p id="lessonAim"></p></div>
+      <div class="sidebar-bottom"><span class="local-dot"></span> Ready to teach <button id="shortcutsBtn" class="icon-button" aria-label="Keyboard shortcuts">⌨</button></div>
     </aside>
-
-    <main>
-      <div id="status"></div>
-      <section id="teacherStage" aria-live="polite" tabindex="0"></section>
-      <section id="audienceStage" aria-live="polite"></section>
-      <section id="participationHub" class="participation-hub" hidden>
-        <h3>Live Participation</h3>
-        <div id="pollCard" class="tool-card" hidden></div>
-        <div id="exitTicketCard" class="tool-card" hidden></div>
-        <div id="coldCallCard" class="tool-card" hidden></div>
-      </section>
+    </div>
+    <main class="workspace">
+      <div class="workspace-heading"><div><div class="breadcrumb">Workspace <span>/</span> <span id="stageBreadcrumb">Lead-in</span></div><h2>Let’s make learning happen.</h2></div><div class="view-switch" aria-label="Workspace view"><button id="presenterViewBtn" class="selected" aria-pressed="true">Teacher</button><button id="previewBtn" aria-pressed="false">Student preview</button></div></div>
+      <div class="workspace-grid">
+        <div class="lesson-column">
+          <div class="canvas-heading"><span><span class="live-dot"></span> <span id="canvasLabel">TEACHER WORKSPACE</span></span><span id="stageCounter">01 / 02</span></div>
+          <section id="teacherStage" tabindex="0" aria-label="Lesson canvas"></section>
+          <section id="audienceStage" aria-label="Student lesson canvas"></section>
+          <div class="board-dock" aria-label="Board controls">
+          <div class="presentation-controls"><button id="prevBtn" class="icon-button" aria-label="Previous stage" title="Previous stage (←)">←</button><div class="stage-progress"><span id="progressLabel"></span><div class="progress-track"><div id="progressFill"></div></div></div><button id="revealAnswerBtn" class="button secondary">Reveal answer</button><button id="nextBtn" class="button primary">Next stage <span aria-hidden="true">→</span></button></div>
+            <nav class="board-tools" aria-label="Classroom tools"><button id="boardPenBtn" class="tool-launch" aria-pressed="false"><span aria-hidden="true">✎</span>Annotate</button><button class="tool-launch" data-target="section-participation"><span aria-hidden="true">◷</span>Participation</button><button class="tool-launch" data-target="section-view"><span aria-hidden="true">▣</span>Display</button><button class="tool-launch" data-target="section-export"><span aria-hidden="true">↗</span>Export PDF</button></nav>
+          <div id="drawingToolbar" class="drawing-toolbar" aria-label="Drawing tools" hidden><button id="finishDrawingBtn" class="button secondary">✓ Done</button><div id="quickColors" class="color-swatches"></div><button id="quickUndoBtn" class="icon-button" aria-label="Undo drawing">↶</button><button id="quickRedoBtn" class="icon-button" aria-label="Redo drawing">↷</button><button id="penSettingsBtn" class="icon-button" aria-label="Pen settings">⚙</button></div>
+          </div>
+          <div class="canvas-footnote"><span>← → navigate <span class="dot-separator">·</span> R reveal answer <span class="dot-separator">·</span> A annotate</span><button id="hideAnswersBtn" class="text-button">Hide answers</button></div>
+          <section id="participationHub" class="participation-hub" hidden><div class="participation-heading"><h3>Classroom activity</h3><button id="closeActivityBtn" class="text-button">Dismiss</button></div><div id="pollCard" class="tool-card" hidden></div><div id="exitTicketCard" class="tool-card" hidden></div><div id="coldCallCard" class="tool-card" hidden></div></section>
+        </div>
+        <aside class="teaching-sidebar" aria-label="Teacher guidance">
+          <section class="timer-card"><div class="card-heading"><h3>Stage timer</h3><span id="suggestedTime">8 min planned</span></div><div class="timer-display"><span id="timerReadout" role="timer">08:00</span><span id="timerState">READY WHEN YOU ARE</span></div><div class="timer-actions"><button id="startTimerBtn" class="button primary">Start timer</button><button id="pauseTimerBtn" class="button secondary" hidden>Pause</button><button id="resetTimerBtn" class="icon-button" aria-label="Reset timer">↺</button></div><details class="timer-settings"><summary>Adjust duration</summary><label for="timerMinutes">Minutes</label><input id="timerMinutes" type="number" min="1" max="180" value="8" /></details></section>
+          <section class="guidance-card"><div class="card-heading"><h3>Teacher’s notes</h3><span class="private-badge">Only you</span></div><div id="teacherNotes"></div></section>
+          <div class="next-up"><span class="eyebrow">UP NEXT</span><p id="nextStageLabel"></p></div>
+        </aside>
+      </div>
+      <div id="status" role="status" aria-live="polite"></div>
     </main>
   </div>
-
-  <script src="main.js"></script>
+  <div class="presentation-bar" id="presentationBar" hidden><span id="presentLessonTitle">Lesson Presenter</span><div><button id="presentationPrevBtn" class="icon-button" aria-label="Previous presentation stage">←</button><span id="presentationCounter"></span><button id="presentationNextBtn" class="icon-button" aria-label="Next presentation stage">→</button><button id="presentationRevealBtn" class="button secondary">Reveal answer</button><button id="exitPresentBtn" class="button primary">Exit presentation <kbd>Esc</kbd></button></div></div>
+  <dialog id="toolsDialog" aria-labelledby="dialogTitle"><div class="dialog-heading"><div><span class="eyebrow">LESSON PRESENTER</span><h2 id="dialogTitle">Import lesson</h2></div><button id="closeDialogBtn" class="icon-button" aria-label="Close tools">×</button></div><div class="dialog-body">
+    <section id="section-lesson" class="feature-section"><p class="section-description">Bring your lesson plan into the workspace. Upload a JSON file or paste its contents below.</p><label class="file-upload" for="lessonFile"><span aria-hidden="true">↥</span><strong>Choose a lesson file</strong><span>JSON format</span><input id="lessonFile" type="file" accept=".json,application/json" /></label><label for="lessonJson">Lesson JSON</label><textarea id="lessonJson" spellcheck="false"></textarea><p id="importError" role="alert" class="import-error" hidden></p><div class="dialog-actions"><button id="sampleLessonBtn" class="button secondary">Use sample lesson</button><button id="loadLessonBtn" class="button primary">Load lesson →</button></div><p class="helper">Loading starts a fresh session. Your current lesson stays open until the new plan is valid.</p></section>
+    <section id="section-annotator" class="feature-section"><p class="section-description">Draw directly on the lesson canvas. Press A to turn the pen on or off.</p><label>Pen color</label><div class="color-swatches" id="colorSwatches"></div><label for="penSize">Pen size <span id="penSizeValue">4 px</span></label><input id="penSize" type="range" min="2" max="20" value="4" /><button id="toggleAnnotatorBtn" class="button primary full-width">Enable pen</button><div class="button-row"><button id="undoAnnotationBtn" class="button secondary">Undo stroke</button><button id="redoAnnotationBtn" class="button secondary">Redo stroke</button></div><button id="clearPageAnnotationBtn" class="button secondary full-width">Clear this stage’s annotations</button><p class="helper">Paste an image onto a stage with Ctrl / Cmd + V. Drag it to move, or use its corner to resize.</p></section>
+    <section id="section-view" class="feature-section"><p class="section-description">Choose a canvas size for your classroom.</p><button id="boardModeBtn" class="display-option" aria-pressed="false"><strong>Board view</strong><span>A larger canvas for a classroom screen</span></button><button id="tabletModeBtn" class="display-option" aria-pressed="false"><strong>Compact view</strong><span>A comfortable reading width on smaller devices</span></button><button id="standardModeBtn" class="display-option" aria-pressed="true"><strong>Standard view</strong><span>Canvas and teacher guidance side by side</span></button></section>
+    <section id="section-participation" class="feature-section"><p class="section-description">Display an activity for discussion, or collect responses together on this device.</p><label for="pollQuestion">Quick poll</label><input id="pollQuestion" type="text" placeholder="How confident do you feel?" /><button id="launchPollBtn" class="button primary full-width">Show poll</button><label for="exitTicketPrompt">Exit ticket</label><input id="exitTicketPrompt" type="text" placeholder="One thing you learned today…" /><button id="showExitTicketBtn" class="button secondary full-width">Show exit ticket</button><label for="studentRoster">Class roster · one name per line</label><textarea id="studentRoster" class="roster-input" placeholder="Add your students’ names"></textarea><button id="coldCallBtn" class="button secondary full-width">Pick a student</button><button id="toggleMiniWhiteboardBtn" class="button secondary full-width">Show response boards</button><p class="helper">Activities run on this device. Student devices are not connected.</p></section>
+    <section id="section-export" class="feature-section"><p class="section-description">Create a handout or a teacher copy of every stage using your browser’s print dialog.</p><label class="checkbox-label"><input id="includeAnnotationsPrint" type="checkbox" checked /> Include annotations</label><label class="checkbox-label"><input id="includeHiddenAnswersPrint" type="checkbox" checked /> Include all answers</label><button id="exportPdfBtn" class="button primary full-width">Print / save PDF</button></section>
+    <section id="section-shortcuts" class="feature-section"><p class="section-description">Keep your attention on the class.</p><dl class="shortcut-list"><div><dt>Previous / next stage</dt><dd><kbd>←</kbd> <kbd>→</kbd></dd></div><div><dt>Reveal next answer</dt><dd><kbd>R</kbd></dd></div><div><dt>Toggle annotation pen</dt><dd><kbd>A</kbd></dd></div><div><dt>Exit presentation / close tools</dt><dd><kbd>Esc</kbd></dd></div></dl><p class="helper">Shortcuts pause while you’re typing or using a dialog.</p></section>
+  </div></dialog>
+  <script src="main.js?v=3"></script>
 </body>
 </html>

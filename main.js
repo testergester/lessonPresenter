@@ -1,70 +1,29 @@
-const lessonJsonInput = document.getElementById('lessonJson');
-const loadLessonBtn = document.getElementById('loadLessonBtn');
-const prevBtn = document.getElementById('prevBtn');
-const nextBtn = document.getElementById('nextBtn');
-const revealAnswerBtn = document.getElementById('revealAnswerBtn');
-const exportPdfBtn = document.getElementById('exportPdfBtn');
-const teacherStage = document.getElementById('teacherStage');
-const audienceStage = document.getElementById('audienceStage');
-const status = document.getElementById('status');
-const colorSwatches = document.getElementById('colorSwatches');
-const penSize = document.getElementById('penSize');
-const penSizeValue = document.getElementById('penSizeValue');
-const toggleAnnotatorBtn = document.getElementById('toggleAnnotatorBtn');
-const clearPageAnnotationBtn = document.getElementById('clearPageAnnotationBtn');
-const undoAnnotationBtn = document.getElementById('undoAnnotationBtn');
-const redoAnnotationBtn = document.getElementById('redoAnnotationBtn');
-const presenterViewBtn = document.getElementById('presenterViewBtn');
-const audienceViewBtn = document.getElementById('audienceViewBtn');
-const boardModeBtn = document.getElementById('boardModeBtn');
-const tabletModeBtn = document.getElementById('tabletModeBtn');
-const stageJump = document.getElementById('stageJump');
-const offlineBanner = document.getElementById('offlineBanner');
-const includeAnnotationsPrint = document.getElementById('includeAnnotationsPrint');
-const includeHiddenAnswersPrint = document.getElementById('includeHiddenAnswersPrint');
-const togglePanelMinimizeBtn = document.getElementById('togglePanelMinimizeBtn');
-const panelPositionBtn = document.getElementById('panelPositionBtn');
-const panelToolbarButtons = [...document.querySelectorAll('.toolbar-btn')];
-const controlPanel = document.getElementById('controlPanel');
-const panelContent = document.getElementById('panelContent');
-
-const timerReadout = document.getElementById('timerReadout');
-const timerMinutes = document.getElementById('timerMinutes');
-const startTimerBtn = document.getElementById('startTimerBtn');
-const pauseTimerBtn = document.getElementById('pauseTimerBtn');
-const resetTimerBtn = document.getElementById('resetTimerBtn');
-
-const participationHub = document.getElementById('participationHub');
-const pollQuestion = document.getElementById('pollQuestion');
-const launchPollBtn = document.getElementById('launchPollBtn');
-const exitTicketPrompt = document.getElementById('exitTicketPrompt');
-const showExitTicketBtn = document.getElementById('showExitTicketBtn');
-const coldCallBtn = document.getElementById('coldCallBtn');
-const toggleMiniWhiteboardBtn = document.getElementById('toggleMiniWhiteboardBtn');
-const pollCard = document.getElementById('pollCard');
-const exitTicketCard = document.getElementById('exitTicketCard');
-const coldCallCard = document.getElementById('coldCallCard');
-
-const penColors = ['#e11d48', '#2563eb', '#059669', '#d97706', '#111827', '#7c3aed'];
+'use strict';
+const $ = (id) => document.getElementById(id);
 const OFFLINE_SNAPSHOT_KEY = 'lessonPresenter.snapshot.v1';
-const students = ['Amina', 'Leo', 'Mia', 'Arjun', 'Sofia', 'Noah', 'Ivy', 'Luca'];
-
-let selectedColor = penColors[0];
-let selectedPenSize = Number(penSize.value);
-let annotatorEnabled = false;
-let lessonSchema = null;
-
-let lesson = { title: 'Sample Lesson', pages: [] };
+const penColors = ['#e11d48', '#2563eb', '#059669', '#d97706', '#111827', '#7c3aed'];
+const colorNames = ['Rose', 'Blue', 'Green', 'Amber', 'Black', 'Purple'];
+let lesson = {title: '', pages: []};
 let currentPageIndex = 0;
 let revealedAnswerCountByPage = [];
-let pageCanvases = [];
 let annotationStateByPage = [];
+let pageCanvases = [];
 let resizeObserver;
-let timerInterval = null;
-let remainingSeconds = 0;
-let timerRunning = false;
+let selectedColor = penColors[0];
+let selectedPenSize = 4;
+let annotatorEnabled = false;
 let miniWhiteboardsVisible = false;
-
+let roster = [];
+let remainingSeconds = 480;
+let timerRunning = false;
+let timerStarted = false;
+let timerInterval = null;
+let timerDeadline = 0;
+let saveWarningShown = false;
+let lessonSchema;
+let dialogOpener;
+let snapshotTimeout;
+let lessonPanelState = {pinned:false, hovered:false, focused:false};
 const sampleLesson = {
   lesson: {
     id: 'u5_2_c2_writing_fronting_01',
@@ -205,764 +164,578 @@ const sampleLesson = {
   }
 };
 
-lessonJsonInput.value = JSON.stringify(sampleLesson, null, 2);
 
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = String(text);
+  return node;
+}
+function list(value) { return Array.isArray(value) ? value : []; }
+function displayText(value) {
+  if (typeof value === 'string') return value;
+  if (value == null) return '';
+  if (typeof value === 'object') return String(value.text || value.prompt || value.question || value.example || JSON.stringify(value));
+  return String(value);
+}
+function normalizeQuestionEntry(question, index) {
+  if (typeof question === 'string') return {id: `q${index + 1}`, prompt: question, answer: ''};
+  return {id: String(question?.id || question?.questionId || `q${index + 1}`), prompt: displayText(question), answer: displayText(question?.answer)};
+}
+function validateBySchema(value, schema, path = 'lesson') {
+  const type = Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value;
+  if (schema.type && !(Array.isArray(schema.type) ? schema.type : [schema.type]).includes(type)) {
+    throw new Error(`${path} must be ${[].concat(schema.type).join(' or ')}.`);
+  }
+  if (schema.properties && type === 'object') {
+    Object.entries(schema.properties).forEach(([key, rule]) => {
+      if (key in value) validateBySchema(value[key], rule, `${path}.${key}`);
+    });
+  }
+  if (schema.items && type === 'array') value.forEach((item, index) => validateBySchema(item, schema.items, `${path}[${index + 1}]`));
+}
 async function ensureSchemaLoaded() {
   if (lessonSchema) return lessonSchema;
   const response = await fetch('./schema/lesson.schema.json');
-  if (!response.ok) throw new Error('Could not load lesson schema file.');
+  if (!response.ok) throw new Error('The lesson format could not be loaded. Please refresh and try again.');
   lessonSchema = await response.json();
   return lessonSchema;
 }
-
-function validateBySchema(value, schema, path = 'root') {
-  if (schema.type) {
-    const type = Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value;
-    const allowed = Array.isArray(schema.type) ? schema.type : [schema.type];
-    if (!allowed.includes(type)) {
-      throw new Error(`${path} should be type ${allowed.join(' | ')}, got ${type}.`);
-    }
-  }
-
-  if (schema.required && typeof value === 'object' && !Array.isArray(value) && value !== null) {
-    schema.required.forEach((key) => {
-      if (!(key in value)) throw new Error(`${path}.${key} is required by schema.`);
-    });
-  }
-
-  if (schema.additionalProperties === false && schema.properties && typeof value === 'object' && !Array.isArray(value) && value !== null) {
-    Object.keys(value).forEach((key) => {
-      if (!(key in schema.properties)) throw new Error(`${path}.${key} is not allowed by strict schema.`);
-    });
-  }
-
-  if (schema.properties && typeof value === 'object' && !Array.isArray(value) && value !== null) {
-    Object.entries(schema.properties).forEach(([key, propSchema]) => {
-      if (key in value) validateBySchema(value[key], propSchema, `${path}.${key}`);
-    });
-  }
-
-  if (schema.items && Array.isArray(value)) {
-    value.forEach((item, i) => validateBySchema(item, schema.items, `${path}[${i}]`));
-  }
-}
-
-function normalizeQuestionEntry(question) {
-  if (typeof question === 'string') return { prompt: question, answer: '' };
-  if (question && typeof question === 'object') {
-    return { prompt: question.prompt || question.question || JSON.stringify(question), answer: question.answer || '' };
-  }
-  return { prompt: String(question), answer: '' };
-}
-
 function lessonSchemaToPresenterSchema(source) {
-  const lessonMeta = source.lesson || source;
-  const stages = [...(lessonMeta.stages || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
-
-  const pages = stages.map((stageItem, index) => {
-    const content = stageItem.content || {};
-    const prompts = Array.isArray(content.prompts) ? content.prompts : [];
-
-    const supplementalLines = [
-      content.text || '',
-      prompts.length ? `Prompts: ${prompts.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' • ')}` : ''
-    ].filter(Boolean);
-
-    const questions = Array.isArray(content.questions) ? content.questions.map(normalizeQuestionEntry) : [];
-    const answerItems = Array.isArray(stageItem.answers?.items) ? stageItem.answers.items : [];
-    const answersByIndex = answerItems.map((item) => {
-      const alternatives = Array.isArray(item.alternatives) && item.alternatives.length ? ` (alts: ${item.alternatives.join(', ')})` : '';
-      const notes = item.notes ? ` — ${item.notes}` : '';
-      return `${item.answer || ''}${alternatives}${notes}`.trim();
+  const meta = source.lesson || source;
+  const stages = [...meta.stages].sort((a,b) => (a.order || 0) - (b.order || 0));
+  const pages = stages.map((stage, index) => {
+    const content = stage.content || {};
+    const questions = list(content.questions).map(normalizeQuestionEntry);
+    const answers = list(stage.answers?.items);
+    questions.forEach((question, i) => {
+      const matched = answers.find((answer) => answer.questionId === question.id) || answers[i];
+      if (!question.answer && matched) question.answer = displayText(matched.answer);
     });
-
-    if (!questions.length && answersByIndex.length) {
-      answersByIndex.forEach((ans, i) => questions.push({ prompt: `Item ${i + 1}`, answer: ans }));
-    } else {
-      questions.forEach((q, i) => {
-        q.answer = q.answer || answersByIndex[i] || '';
-      });
-    }
-
-    return {
-      stageId: stageItem.id || `stage-${index + 1}`,
-      title: `${index + 1}. ${stageItem.name || stageItem.stageType || `Stage ${index + 1}`}`,
-      content: supplementalLines.join('\n\n'),
-      questions
-    };
+    if (!questions.length) answers.forEach((answer,i) => questions.push({id:answer.questionId || `q${i+1}`,prompt: `Discussion ${i+1}`,answer:displayText(answer.answer)}));
+    return {stageId:stage.id || `stage-${index+1}`,title:stage.name || stage.stageType || `Stage ${index+1}`,stageType:stage.stageType || 'Activity',durationMinutes:stage.durationMinutes || 5,aim:stage.aim || '',interaction:stage.interaction || '',instructions:list(stage.instructions),procedure:list(stage.procedure),teacherNotes:list(stage.teacherNotes),timingNotes:list(stage.timingNotes),anticipatedProblems:list(stage.anticipatedProblems),content:content.text || '',prompts:list(content.prompts),examples:list(content.examples),items:list(content.items),questions};
   });
-
-  return { title: lessonMeta.title || 'Untitled Lesson', pages };
+  return {title:meta.title || 'Untitled lesson',level:meta.level || '',lessonType:meta.lessonType || '',durationMinutes:meta.durationMinutes || pages.reduce((total,page)=>total+page.durationMinutes,0),mainAim:meta.mainAim || '',pages};
 }
-
 function parseLesson(jsonText) {
-  const parsed = JSON.parse(jsonText);
-  validateBySchema(parsed, lessonSchema);
-  return lessonSchemaToPresenterSchema(parsed);
+  let source;
+  try { source = JSON.parse(jsonText); } catch { throw new Error('This JSON is not valid. Check commas, quotes, and brackets, then try again.'); }
+  if (!source || typeof source !== 'object' || Array.isArray(source)) throw new Error('Use a lesson object containing a title and stages.');
+  const meta = source.lesson || source;
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) throw new Error('The lesson must be an object.');
+  if (!Array.isArray(meta.stages) || !meta.stages.length) throw new Error('Add at least one stage to the lesson’s stages array.');
+  if (meta.stages.some(stage => !stage || typeof stage !== 'object' || Array.isArray(stage))) throw new Error('Each stage must be an object with a name and content.');
+  validateBySchema(meta, lessonSchema.properties.lesson);
+  meta.stages.forEach(stage => {
+    if (stage.durationMinutes !== undefined && (!Number.isFinite(stage.durationMinutes) || stage.durationMinutes <= 0)) throw new Error('Stage durations must be positive numbers.');
+  });
+  return lessonSchemaToPresenterSchema(source);
 }
-
-function setStatus(message) {
-  status.textContent = message;
+function setLessonPanel(changes) {
+  Object.assign(lessonPanelState, changes);
+  const open = lessonPanelState.pinned || lessonPanelState.hovered || lessonPanelState.focused;
+  document.body.classList.toggle('lesson-plan-open', open);
+  $('lessonPlanToggle').setAttribute('aria-expanded', String(open));
+  $('lessonPlanToggle').setAttribute('aria-pressed', String(lessonPanelState.pinned));
+  $('lessonOutline').inert = !open;
 }
-
-function openPanelOverlay() {
-  document.body.classList.add('panel-overlay-open');
+function closeLessonPanel() {
+  setLessonPanel({pinned:false, hovered:false, focused:false});
+  if ($('lessonOutline').contains(document.activeElement)) $('lessonPlanToggle').focus();
 }
-
-function closePanelOverlay() {
-  document.body.classList.remove('panel-overlay-open');
-}
-
-function setActivePanelSection(targetId) {
-  const sections = [...document.querySelectorAll('.feature-section')];
-  sections.forEach((section) => section.classList.toggle('active', section.id === targetId));
-  panelToolbarButtons.forEach((button) => button.classList.toggle('active', button.dataset.target === targetId));
-  openPanelOverlay();
-}
-
-function togglePanelMinimized() {
-  const willMinimize = !document.body.classList.contains('panel-minimized');
-  document.body.classList.toggle('panel-minimized', willMinimize);
-  if (willMinimize) closePanelOverlay();
-  else openPanelOverlay();
-  if (togglePanelMinimizeBtn) {
-    togglePanelMinimizeBtn.textContent = willMinimize ? 'Expand' : 'Minimize';
-    togglePanelMinimizeBtn.title = willMinimize ? 'Expand panel' : 'Minimize panel';
+function setStatus(message) { $('status').textContent = message; }
+function openTools(target) {
+  const titles = {'section-lesson':'Import lesson','section-annotator':'Annotate your lesson','section-participation':'Bring everyone in','section-view':'Display settings','section-export':'Export your lesson','section-shortcuts':'Keyboard shortcuts'};
+  document.querySelectorAll('.feature-section').forEach(section=>section.classList.toggle('active',section.id===target));
+  $('dialogTitle').textContent = titles[target];
+  if (!$('toolsDialog').open) {
+    dialogOpener = document.activeElement;
+    $('toolsDialog').showModal();
   }
 }
-
-function togglePanelDockPosition() {
-  const isBottom = !document.body.classList.contains('panel-bottom');
-  document.body.classList.toggle('panel-bottom', isBottom);
-  if (panelPositionBtn) panelPositionBtn.textContent = isBottom ? 'Dock: Bottom' : 'Dock: Side';
-  openPanelOverlay();
+function closeTools() { $('toolsDialog').close(); }
+function noteGroup(heading, entries, ordered = false) {
+  if (!entries.length) return null;
+  const group = element('div','note-group');
+  group.append(element('h4','',heading));
+  const content = element(ordered ? 'ol' : 'ul');
+  entries.forEach(entry=>content.append(element('li','',displayText(entry))));
+  group.append(content);
+  return group;
 }
-
-function createColorSwatches() {
-  colorSwatches.innerHTML = '';
-  penColors.forEach((color) => {
-    const swatch = document.createElement('button');
-    swatch.type = 'button';
-    swatch.className = 'color-swatch';
-    swatch.style.background = color;
-    if (color === selectedColor) swatch.classList.add('active');
-    swatch.addEventListener('click', () => {
-      selectedColor = color;
-      [...colorSwatches.children].forEach((c) => c.classList.remove('active'));
-      swatch.classList.add('active');
-    });
-    colorSwatches.appendChild(swatch);
-  });
+function renderGuidance(page) {
+  const container = $('teacherNotes');
+  container.replaceChildren();
+  const aim = element('div','note-group');
+  aim.append(element('h4','','STAGE AIM'),element('p','',page.aim || 'Guide students through the activity.'));
+  container.append(aim);
+  [noteGroup('How to run it',list(page.procedure),true),noteGroup('Keep in mind',list(page.teacherNotes)),noteGroup('Pacing',list(page.timingNotes))].filter(Boolean).forEach(group=>container.append(group));
+  if (list(page.anticipatedProblems).length) {
+    const group = element('div','note-group');
+    group.append(element('h4','','IF STUDENTS GET STUCK'));
+    page.anticipatedProblems.forEach(problem=>group.append(element('p','',`${problem.problem} ${problem.solution}`)));
+    container.append(group);
+  }
 }
-
-function redrawCanvas(pageIndex) {
-  const canvas = pageCanvases[pageIndex];
-  const pageState = annotationStateByPage[pageIndex];
-  if (!canvas || !pageState) return;
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  pageState.strokes.forEach((stroke) => {
-    if (!stroke.points.length) return;
-    ctx.strokeStyle = stroke.color;
-    ctx.lineWidth = stroke.size;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-    stroke.points.slice(1).forEach((pt) => ctx.lineTo(pt.x, pt.y));
-    ctx.stroke();
-    ctx.closePath();
-  });
-}
-
-function resizeCanvasToParent(canvas, pageIndex) {
-  const parentRect = canvas.parentElement.getBoundingClientRect();
-  canvas.width = parentRect.width;
-  canvas.height = parentRect.height;
-  redrawCanvas(pageIndex);
-}
-
-function attachDrawingEvents(canvas, pageIndex) {
-  let drawing = false;
-  let activeStroke = null;
-
-  const getPos = (event) => {
-    const rect = canvas.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
-  };
-
-  canvas.addEventListener('pointerdown', (event) => {
-    if (!annotatorEnabled || !canvas.classList.contains('active')) return;
-    drawing = true;
-    activeStroke = { color: selectedColor, size: selectedPenSize, points: [getPos(event)] };
-  });
-
-  canvas.addEventListener('pointermove', (event) => {
-    if (!drawing || !activeStroke) return;
-    activeStroke.points.push(getPos(event));
-    const pageState = annotationStateByPage[pageIndex];
-    const preview = [...pageState.strokes, activeStroke];
-    const original = pageState.strokes;
-    pageState.strokes = preview;
-    redrawCanvas(pageIndex);
-    pageState.strokes = original;
-  });
-
-  ['pointerup', 'pointerleave', 'pointercancel'].forEach((type) => {
-    canvas.addEventListener(type, () => {
-      if (drawing && activeStroke && activeStroke.points.length > 1) {
-        const pageState = annotationStateByPage[pageIndex];
-        pageState.strokes.push(activeStroke);
-        pageState.redoStack = [];
-        redrawCanvas(pageIndex);
-        persistSnapshot();
-      }
-      drawing = false;
-      activeStroke = null;
-    });
+function renderOutline() {
+  $('lessonTitle').textContent = lesson.title;
+  $('presentLessonTitle').textContent = lesson.title;
+  $('lessonMeta').replaceChildren();
+  [lesson.level,lesson.lessonType,lesson.durationMinutes ? `${lesson.durationMinutes} min` : ''].filter(Boolean).forEach(text=>$('lessonMeta').append(element('span','',text)));
+  $('stageCount').textContent = `${lesson.pages.length} stage${lesson.pages.length === 1 ? '' : 's'}`;
+  $('outlineDuration').textContent = `${lesson.pages.reduce((total,page)=>total+(page.durationMinutes || 5),0)} min planned`;
+  $('lessonAim').textContent = lesson.mainAim || 'Move through each stage at your class’s pace.';
+  $('stageList').replaceChildren();
+  lesson.pages.forEach((page,index)=>{
+    const button = element('button','stage-item');
+    button.type = 'button';
+    const info = element('span','stage-info');
+    info.append(element('strong','',page.title),element('small','',`${page.durationMinutes || 5} min · ${(page.stageType || 'activity').replaceAll('_',' ')}`));
+    button.append(element('span','stage-number',String(index+1).padStart(2,'0')),info);
+    button.addEventListener('click',()=>goToStage(index));
+    $('stageList').append(button);
   });
 }
-
-function getCurrentPageElement(container = teacherStage) {
-  return container.querySelector(`.page[data-page-index="${currentPageIndex}"]`);
-}
-
-function enableDragAndResize(container) {
-  const handle = document.createElement('div');
-  handle.className = 'resize-handle';
-  container.appendChild(handle);
-
-  let drag = null;
-  container.addEventListener('pointerdown', (event) => {
-    if (event.target === handle) return;
-    const rect = container.getBoundingClientRect();
-    const parentRect = container.parentElement.getBoundingClientRect();
-    drag = {
-      mode: 'move',
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top,
-      parentRect
-    };
-    container.setPointerCapture(event.pointerId);
-  });
-
-  handle.addEventListener('pointerdown', (event) => {
-    event.stopPropagation();
-    const rect = container.getBoundingClientRect();
-    drag = { mode: 'resize', startX: event.clientX, startY: event.clientY, width: rect.width, height: rect.height };
-    container.setPointerCapture(event.pointerId);
-  });
-
-  container.addEventListener('pointermove', (event) => {
-    if (!drag) return;
-    if (drag.mode === 'move') {
-      const left = Math.max(0, event.clientX - drag.parentRect.left - drag.offsetX);
-      const top = Math.max(0, event.clientY - drag.parentRect.top - drag.offsetY);
-      container.style.left = `${left}px`;
-      container.style.top = `${top}px`;
-    } else {
-      const width = Math.max(80, drag.width + (event.clientX - drag.startX));
-      const height = Math.max(80, drag.height + (event.clientY - drag.startY));
-      container.style.width = `${width}px`;
-      container.style.height = `${height}px`;
+function createPageElement(page,index,mode) {
+  const article = element('article','page');
+  article.dataset.pageIndex = index;
+  article.append(element('div','page-kicker',`${(page.stageType || 'activity').replaceAll('_',' ').toUpperCase()}${page.interaction ? ` · ${page.interaction}` : ''}`),element('h2','page-title',page.title));
+  if (page.content) article.append(element('p','page-content',page.content));
+  if (list(page.instructions).length) {
+    const instructions = element('div','instruction-block');
+    instructions.append(element('h3','','YOUR TASK'));
+    page.instructions.forEach(text=>instructions.append(element('p','',displayText(text))));
+    article.append(instructions);
+  }
+  if (list(page.prompts).length) {
+    const chips = element('div','prompt-chips');
+    page.prompts.forEach(text=>chips.append(element('span','',displayText(text))));
+    article.append(chips);
+  }
+  list(page.items).forEach(text=>article.append(element('p','question-prompt',displayText(text))));
+  page.questions.forEach((question,questionIndex)=>{
+    const block = element('div','question');
+    const body = element('div','question-body');
+    body.append(element('div','question-prompt',question.prompt));
+    if (question.answer) {
+      const answer = element('div','answer hidden',question.answer);
+      body.append(answer);
     }
+    block.append(element('span','question-number',questionIndex+1),body);
+    article.append(block);
   });
-
-  container.addEventListener('pointerup', () => {
-    drag = null;
-    persistSnapshot();
+  if (list(page.examples).length) {
+    const examples = element('div','examples-block');
+    examples.append(element('h3','','AN EXAMPLE TO GET YOU THINKING'));
+    page.examples.forEach(text=>examples.append(element('p','',displayText(text))));
+    article.append(examples);
+  }
+  const images = element('div','pasted-images');
+  article.append(images);
+  list(annotationStateByPage[index]?.images).forEach(image=>addImageElement(images,image,index,mode));
+  if (mode === 'teacher' && miniWhiteboardsVisible) {
+    const boards = element('div','mini-whiteboards');
+    (roster.length ? roster : ['Response 1','Response 2','Response 3','Response 4']).slice(0,12).forEach((name,i)=>{
+      const card = element('div','mini-board-card');
+      const label = element('label','',name);
+      const input = element('textarea');
+      input.id = `response-${index}-${i}`;
+      label.htmlFor = input.id;
+      input.placeholder = 'Write a response…';
+      input.value = annotationStateByPage[index]?.responses?.[i] || '';
+      input.addEventListener('input',()=>{
+        annotationStateByPage[index].responses ||= [];
+        annotationStateByPage[index].responses[i] = input.value;
+        queueSnapshot();
+      });
+      card.append(label,input);boards.append(card);
+    });
+    article.append(boards);
+  }
+  const footer = element('div','page-footer');
+  footer.append(element('span','','LESSON PRESENTER'),element('span','',`${String(index+1).padStart(2,'0')} / ${String(lesson.pages.length).padStart(2,'0')}`));
+  article.append(footer);
+  const canvas = element('canvas','annotator-layer');
+  canvas.setAttribute('aria-hidden','true');
+  article.append(canvas);
+  attachDrawingEvents(canvas,index);
+  return article;
+}
+function buildPages() {
+  if (resizeObserver) resizeObserver.disconnect();
+  $('teacherStage').replaceChildren();$('audienceStage').replaceChildren();pageCanvases=[];
+  lesson.pages.forEach((page,index)=>{
+    const teacher = createPageElement(page,index,'teacher');
+    const audience = createPageElement(page,index,'audience');
+    teacher.style.display = audience.style.display = 'none';
+    $('teacherStage').append(teacher);$('audienceStage').append(audience);
+    pageCanvases.push(teacher.querySelector('canvas'));
+  });
+  resizeObserver = new ResizeObserver(()=>resizeVisibleCanvases());
+  [...$('teacherStage').children,...$('audienceStage').children].forEach(page=>resizeObserver.observe(page));
+}
+function activePage(container = $('teacherStage')) { return container.children[currentPageIndex]; }
+function answerTotal() { return lesson.pages[currentPageIndex]?.questions.filter(q=>q.answer).length || 0; }
+function syncAnswers() {
+  const shown = revealedAnswerCountByPage[currentPageIndex] || 0;
+  [$('teacherStage'),$('audienceStage')].forEach(container=>{
+    activePage(container)?.querySelectorAll('.answer').forEach((answer,i)=>answer.classList.toggle('hidden',i>=shown));
+  });
+  const total = answerTotal();
+  $('revealAnswerBtn').disabled = $('presentationRevealBtn').disabled = shown >= total;
+  $('revealAnswerBtn').textContent = total ? shown >= total ? 'Answers revealed' : `Reveal answer · ${shown}/${total}` : 'No answers';
+  $('hideAnswersBtn').hidden = shown === 0;
+}
+function showPage(index) {
+  if (!lesson.pages[index]) return;
+  currentPageIndex = index;
+  [$('teacherStage'),$('audienceStage')].forEach(container=>[...container.children].forEach((page,i)=>page.style.display=i===index?'block':'none'));
+  $('stageList').querySelectorAll('button').forEach((button,i)=>{
+    button.classList.toggle('active',i===index);
+    if (i===index) button.setAttribute('aria-current','step'); else button.removeAttribute('aria-current');
+  });
+  const page = lesson.pages[index];
+  $('stageBreadcrumb').textContent = page.title;
+  $('stageCounter').textContent = `${String(index+1).padStart(2,'0')} / ${String(lesson.pages.length).padStart(2,'0')}`;
+  $('progressLabel').textContent = `Stage ${index+1} of ${lesson.pages.length}`;
+  $('presentationCounter').textContent = `${index+1} / ${lesson.pages.length}`;
+  $('progressFill').style.width = `${(index+1)/lesson.pages.length*100}%`;
+  $('prevBtn').disabled = $('presentationPrevBtn').disabled = index === 0;
+  $('nextBtn').disabled = $('presentationNextBtn').disabled = index === lesson.pages.length-1;
+  $('nextStageLabel').textContent = lesson.pages[index+1] ? `${lesson.pages[index+1].title} · ${lesson.pages[index+1].durationMinutes || 5} min` : 'Final stage. Time to reflect and wrap up.';
+  $('suggestedTime').textContent = `${page.durationMinutes || 5} min planned`;
+  renderGuidance(page);syncAnswers();syncDrawing();
+  requestAnimationFrame(resizeVisibleCanvases);
+}
+function goToStage(index) {
+  if (index < 0 || index >= lesson.pages.length || index === currentPageIndex) return;
+  showPage(index);
+  $('timerMinutes').value = lesson.pages[index].durationMinutes || 5;
+  resetTimer();
+  persistSnapshot();
+  setStatus(`Stage ${index+1}: ${lesson.pages[index].title}`);
+}
+function revealNextAnswer() {
+  const total = answerTotal();
+  if ((revealedAnswerCountByPage[currentPageIndex] || 0)>=total) return;
+  revealedAnswerCountByPage[currentPageIndex] = (revealedAnswerCountByPage[currentPageIndex] || 0)+1;
+  syncAnswers();persistSnapshot();
+  setStatus(`Answer ${revealedAnswerCountByPage[currentPageIndex]} of ${total} revealed.`);
+}
+function initLesson(parsed) {
+  lesson = parsed;currentPageIndex=0;
+  revealedAnswerCountByPage = lesson.pages.map(()=>0);
+  annotationStateByPage = lesson.pages.map(()=>({strokes:[],redoStack:[],images:[],responses:[]}));
+  miniWhiteboardsVisible=false;setAnnotation(false);
+  renderOutline();buildPages();showPage(0);
+  $('timerMinutes').value = lesson.pages[0].durationMinutes || 5;resetTimer();
+  $('participationHub').hidden=true;
+  persistSnapshot();setStatus('Lesson ready. Start with the first stage, or choose any stage in the lesson flow.');
+}
+function formatTime(seconds) { return `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; }
+function timerDuration() {
+  const minutes = Math.min(180,Math.max(1,Number($('timerMinutes').value)||5));
+  $('timerMinutes').value = minutes;
+  return Math.round(minutes*60);
+}
+function renderTimer() {
+  $('timerReadout').textContent = formatTime(remainingSeconds);
+  $('timerReadout').classList.toggle('timer-warning',remainingSeconds<=10&&timerStarted);
+  $('timerState').textContent = timerRunning ? 'TIME TO LEARN' : remainingSeconds===0 ? 'TIME’S UP' : timerStarted ? 'PAUSED' : 'READY WHEN YOU ARE';
+  $('startTimerBtn').hidden=timerRunning;$('pauseTimerBtn').hidden=!timerRunning;
+  $('startTimerBtn').textContent = timerStarted&&remainingSeconds>0 ? 'Resume timer' : remainingSeconds===0 ? 'Restart timer' : 'Start timer';
+}
+function startTimer() {
+  if (timerRunning) return;
+  if (!timerStarted || remainingSeconds===0) remainingSeconds=timerDuration();
+  timerStarted=true;timerRunning=true;timerDeadline=Date.now()+remainingSeconds*1000;
+  clearInterval(timerInterval);
+  timerInterval=setInterval(()=>{
+    remainingSeconds=Math.max(0,Math.ceil((timerDeadline-Date.now())/1000));
+    if (!remainingSeconds) {timerRunning=false;clearInterval(timerInterval);setStatus('Stage timer complete.');}
+    renderTimer();
+  },250);
+  renderTimer();
+}
+function pauseTimer() {
+  remainingSeconds=Math.max(0,Math.ceil((timerDeadline-Date.now())/1000));
+  timerRunning=false;clearInterval(timerInterval);renderTimer();
+}
+function resetTimer() {timerRunning=false;timerStarted=false;clearInterval(timerInterval);remainingSeconds=timerDuration();renderTimer();}
+function setPreview(enabled) {
+  document.body.classList.toggle('preview-mode',enabled);
+  $('presenterViewBtn').classList.toggle('selected',!enabled);$('presenterViewBtn').setAttribute('aria-pressed',String(!enabled));
+  $('previewBtn').classList.toggle('selected',enabled);$('previewBtn').setAttribute('aria-pressed',String(enabled));
+  $('canvasLabel').textContent = enabled ? 'STUDENT VIEW · TEACHER NOTES HIDDEN' : 'TEACHER WORKSPACE';
+  syncDrawing();
+  setStatus(enabled ? 'Student view: teacher guidance is hidden. Board tools remain below the lesson.' : 'Teacher view: stage guidance and notes are visible.');
+  requestAnimationFrame(resizeVisibleCanvases);
+}
+function setAudienceMode(enabled) {
+  document.body.classList.toggle('audience-mode',enabled);
+  $('presentationBar').hidden=!enabled;
+  if (enabled) {setAnnotation(false);$('exitPresentBtn').focus();} else $('audienceViewBtn').focus();
+  requestAnimationFrame(resizeVisibleCanvases);
+}
+function setDisplayMode(mode) {
+  document.body.classList.toggle('board-mode',mode==='board');
+  document.body.classList.toggle('tablet-mode',mode==='tablet');
+  ['board','tablet','standard'].forEach(type=>$(type+'ModeBtn').setAttribute('aria-pressed',String(type===mode)));
+  closeTools();requestAnimationFrame(resizeVisibleCanvases);
+}
+function syncDrawing() {
+  const studentView = document.body.classList.contains('preview-mode');
+  pageCanvases.forEach((canvas,index)=>{
+    canvas.classList.toggle('active',annotatorEnabled&&!studentView&&index===currentPageIndex);
+    canvasForAudience(index)?.classList.toggle('active',annotatorEnabled&&studentView&&index===currentPageIndex);
+  });
+  $('drawingToolbar').hidden=!annotatorEnabled;
+  $('boardPenBtn').classList.toggle('selected',annotatorEnabled);
+  $('boardPenBtn').setAttribute('aria-pressed',String(annotatorEnabled));
+  document.body.classList.toggle('annotation-active',annotatorEnabled);
+  $('toggleAnnotatorBtn').textContent=annotatorEnabled?'Disable pen':'Enable pen';
+  $('toggleAnnotatorBtn').setAttribute('aria-pressed',String(annotatorEnabled));
+  const state=annotationStateByPage[currentPageIndex];
+  $('quickUndoBtn').disabled=$('undoAnnotationBtn').disabled=!state?.strokes?.length;
+  $('quickRedoBtn').disabled=$('redoAnnotationBtn').disabled=!state?.redoStack?.length;
+}
+function setAnnotation(enabled) {
+  annotatorEnabled=enabled;
+  syncDrawing();
+}
+function createColorSwatches() {
+  ['colorSwatches','quickColors'].forEach(id=>{
+    $(id).replaceChildren();
+    penColors.forEach((color,index)=>{
+      const button=element('button','color-swatch');
+      button.type='button';button.style.background=color;button.title=colorNames[index];button.setAttribute('aria-label',`${colorNames[index]} pen`);
+      button.setAttribute('aria-pressed',String(color===selectedColor));button.classList.toggle('active',color===selectedColor);
+      button.addEventListener('click',()=>{selectedColor=color;createColorSwatches();});
+      $(id).append(button);
+    });
   });
 }
-
-function pasteImageIntoCurrentPage(file) {
-  const page = getCurrentPageElement();
-  if (!page) return;
-  const imageArea = page.querySelector('.pasted-images');
-  if (!imageArea) return;
-
-  const reader = new FileReader();
-  reader.onload = () => {
-    const item = document.createElement('div');
-    item.className = 'pasted-image-item';
-    item.style.left = '10px';
-    item.style.top = '10px';
-    item.style.width = '220px';
-    item.style.height = '160px';
-
-    const img = document.createElement('img');
-    img.src = reader.result;
-    img.alt = 'Pasted lesson visual';
-    img.className = 'pasted-image';
-
-    item.appendChild(img);
-    imageArea.appendChild(item);
-    enableDragAndResize(item);
-    setStatus('Image pasted into current page. Drag to move; handle to resize.');
-    persistSnapshot();
+function canvasForAudience(index) {return $('audienceStage').children[index]?.querySelector('canvas');}
+function redrawCanvas(index,previewStroke) {
+  [pageCanvases[index],canvasForAudience(index)].filter(Boolean).forEach(canvas=>{
+    const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);
+    const strokes=[...list(annotationStateByPage[index]?.strokes),...(previewStroke?[previewStroke]:[])];
+    strokes.forEach(stroke=>{
+      if (!stroke.points.length) return;
+      ctx.strokeStyle=stroke.color;ctx.lineWidth=stroke.size;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();
+      const point=(p)=>stroke.normalized?{x:p.x*canvas.width,y:p.y*canvas.height}:p;
+      const first=point(stroke.points[0]);ctx.moveTo(first.x,first.y);
+      stroke.points.slice(1).forEach(p=>{const pos=point(p);ctx.lineTo(pos.x,pos.y);});
+      if(stroke.points.length===1) ctx.lineTo(first.x+.1,first.y+.1);
+      ctx.stroke();
+    });
+  });
+}
+function resizeVisibleCanvases() {
+  [pageCanvases[currentPageIndex],canvasForAudience(currentPageIndex)].filter(Boolean).forEach(canvas=>{
+    const rect=canvas.parentElement.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    if (canvas.width!==Math.round(rect.width)||canvas.height!==Math.round(rect.height)) {canvas.width=Math.round(rect.width);canvas.height=Math.round(rect.height);}
+  });
+  redrawCanvas(currentPageIndex);
+}
+function attachDrawingEvents(canvas,index) {
+  let stroke;
+  const position=(event)=>{const rect=canvas.getBoundingClientRect();return {x:(event.clientX-rect.left)/rect.width,y:(event.clientY-rect.top)/rect.height};};
+  canvas.addEventListener('pointerdown',event=>{
+    if(!annotatorEnabled||!canvas.classList.contains('active')||index!==currentPageIndex||event.button!==0)return;
+    event.preventDefault();canvas.setPointerCapture(event.pointerId);
+    stroke={color:selectedColor,size:selectedPenSize,normalized:true,points:[position(event)]};redrawCanvas(index,stroke);
+  });
+  canvas.addEventListener('pointermove',event=>{if(!stroke)return;stroke.points.push(position(event));redrawCanvas(index,stroke);});
+  const finish=()=>{if(!stroke)return;annotationStateByPage[index].strokes.push(stroke);annotationStateByPage[index].redoStack=[];stroke=null;redrawCanvas(index);syncDrawing();persistSnapshot();};
+  canvas.addEventListener('pointerup',finish);canvas.addEventListener('pointercancel',finish);canvas.addEventListener('lostpointercapture',finish);
+}
+function undoStroke() {const state=annotationStateByPage[currentPageIndex];if(!state?.strokes.length)return;state.redoStack.push(state.strokes.pop());redrawCanvas(currentPageIndex);syncDrawing();persistSnapshot();}
+function redoStroke() {const state=annotationStateByPage[currentPageIndex];if(!state?.redoStack.length)return;state.strokes.push(state.redoStack.pop());redrawCanvas(currentPageIndex);syncDrawing();persistSnapshot();}
+function addImageElement(area,image,index,mode) {
+  const item=element('div','pasted-image-item');
+  Object.assign(item.style,{left:`${image.x}px`,top:`${image.y}px`,width:`${image.width}px`,height:`${image.height}px`});
+  const img=element('img','pasted-image');img.src=image.src;img.alt='Lesson visual';item.append(img);area.append(item);
+  area.style.minHeight=`${Math.max(parseFloat(area.style.minHeight)||200,image.y+image.height)}px`;
+  if(mode!=='teacher')return;
+  const handle=element('div','resize-handle');handle.setAttribute('aria-hidden','true');item.append(handle);
+  let drag;
+  item.addEventListener('pointerdown',event=>{
+    if(event.button!==0)return;event.preventDefault();
+    drag={resize:event.target===handle,startX:event.clientX,startY:event.clientY,x:image.x,y:image.y,width:image.width,height:image.height};item.setPointerCapture(event.pointerId);
+  });
+  item.addEventListener('pointermove',event=>{
+    if(!drag)return;
+    if(drag.resize){image.width=Math.min(area.clientWidth,Math.max(60,drag.width+event.clientX-drag.startX));image.height=Math.max(60,drag.height+event.clientY-drag.startY);}
+    else{image.x=Math.max(0,Math.min(area.clientWidth-image.width,drag.x+event.clientX-drag.startX));image.y=Math.max(0,drag.y+event.clientY-drag.startY);}
+    Object.assign(item.style,{left:`${image.x}px`,top:`${image.y}px`,width:`${image.width}px`,height:`${image.height}px`});
+    area.style.minHeight=`${Math.max(200,image.y+image.height)}px`;
+  });
+  const finish=()=>{if(!drag)return;drag=null;const audienceArea=$('audienceStage').children[index].querySelector('.pasted-images');audienceArea.replaceChildren();annotationStateByPage[index].images.forEach(visual=>addImageElement(audienceArea,visual,index,'audience'));audienceArea.style.minHeight=area.style.minHeight;persistSnapshot();};
+  item.addEventListener('pointerup',finish);item.addEventListener('pointercancel',finish);
+  area.style.minHeight=`${Math.max(parseFloat(area.style.minHeight)||200,image.y+image.height)}px`;
+}
+function onPaste(event) {
+  if(event.target.closest('input,textarea,[contenteditable]')||$('toolsDialog').open||document.body.classList.contains('audience-mode'))return;
+  const file=[...event.clipboardData?.items||[]].find(item=>item.type.startsWith('image/'))?.getAsFile();
+  if(!file)return;
+  event.preventDefault();
+  const index=currentPageIndex;const state=annotationStateByPage[index];
+  const reader=new FileReader();
+  reader.onload=()=>{
+    if(annotationStateByPage[index]!==state)return;
+    const image={src:reader.result,x:10,y:10,width:Math.min(220,$('teacherStage').clientWidth-60),height:160};
+    state.images ||= [];state.images.push(image);
+    [$('teacherStage'),$('audienceStage')].forEach((container,i)=>addImageElement(container.children[index].querySelector('.pasted-images'),image,index,i?'audience':'teacher'));
+    persistSnapshot();setStatus('Image added. Drag to move it, or drag its corner to resize.');
   };
   reader.readAsDataURL(file);
 }
-
-function onPaste(event) {
-  const activeTag = document.activeElement?.tagName;
-  if (activeTag === 'TEXTAREA' || activeTag === 'INPUT') return;
-  const clipboardItems = event.clipboardData?.items || [];
-  const imageItem = [...clipboardItems].find((item) => item.type.startsWith('image/'));
-  if (!imageItem) return;
-  const imageFile = imageItem.getAsFile();
-  if (!imageFile) return;
-  event.preventDefault();
-  pasteImageIntoCurrentPage(imageFile);
+function showActivity(cardId,title,prompt) {
+  [$('pollCard'),$('exitTicketCard'),$('coldCallCard')].forEach(card=>card.hidden=true);
+  const card=$(cardId);card.hidden=false;card.replaceChildren(element('h4','',title),element('p','',prompt));
+  $('participationHub').hidden=false;closeTools();return card;
 }
-
-function createPageElement(page, pageIndex, mode = 'teacher') {
-  const pageEl = document.createElement('article');
-  pageEl.className = 'page';
-  pageEl.dataset.pageIndex = pageIndex;
-
-  const title = document.createElement('h2');
-  title.className = 'page-title';
-  title.textContent = page.title || `Page ${pageIndex + 1}`;
-
-  const content = document.createElement('p');
-  content.className = 'page-content';
-  content.textContent = page.content || '';
-
-  const pasteHint = document.createElement('p');
-  pasteHint.className = 'paste-hint';
-  pasteHint.textContent = 'Tip: click page and use Ctrl/Cmd + V to paste images.';
-
-  const pastedImages = document.createElement('div');
-  pastedImages.className = 'pasted-images';
-
-  pageEl.append(title, content);
-
-  if (mode === 'teacher') {
-    pageEl.append(pasteHint, pastedImages);
-  }
-
-  page.questions.forEach((q, questionIndex) => {
-    const qEl = document.createElement('div');
-    qEl.className = 'question';
-    const prompt = document.createElement('div');
-    prompt.textContent = `${questionIndex + 1}. ${q.prompt}`;
-    const answer = document.createElement('div');
-    answer.className = mode === 'teacher' ? 'answer hidden' : 'answer audience-answer';
-    answer.textContent = `Answer: ${q.answer || '—'}`;
-    qEl.append(prompt, answer);
-    pageEl.appendChild(qEl);
-  });
-
-  if (mode === 'teacher' && miniWhiteboardsVisible) {
-    const miniBoards = document.createElement('div');
-    miniBoards.className = 'mini-whiteboards';
-    students.slice(0, 4).forEach((student) => {
-      const card = document.createElement('div');
-      card.className = 'mini-board-card';
-      card.innerHTML = `<strong>${student}</strong><p>Tap for mini-board response</p>`;
-      miniBoards.appendChild(card);
-    });
-    pageEl.appendChild(miniBoards);
-  }
-
-  return pageEl;
-}
-
-function buildPages() {
-  if (!teacherStage || !audienceStage) {
-    throw new Error('Delivery workspace is missing stage containers (#teacherStage / #audienceStage). Please refresh to load the latest app shell.');
-  }
-  teacherStage.innerHTML = '';
-  audienceStage.innerHTML = '';
-  pageCanvases = [];
-  annotationStateByPage = lesson.pages.map(() => ({ strokes: [], redoStack: [] }));
-
-  lesson.pages.forEach((page, pageIndex) => {
-    const teacherPage = createPageElement(page, pageIndex, 'teacher');
-    const audiencePage = createPageElement(page, pageIndex, 'audience');
-
-    const canvas = document.createElement('canvas');
-    canvas.className = 'annotator-layer';
-    teacherPage.appendChild(canvas);
-
-    teacherStage.appendChild(teacherPage);
-    audienceStage.appendChild(audiencePage);
-
-    resizeCanvasToParent(canvas, pageIndex);
-    attachDrawingEvents(canvas, pageIndex);
-    pageCanvases.push(canvas);
-  });
-
-  if (resizeObserver) resizeObserver.disconnect();
-  resizeObserver = new ResizeObserver(() => pageCanvases.forEach((canvas, i) => resizeCanvasToParent(canvas, i)));
-  resizeObserver.observe(teacherStage);
-
-  buildStageJumpOptions();
-}
-
-function buildStageJumpOptions() {
-  if (!stageJump) return;
-  stageJump.innerHTML = '';
-  lesson.pages.forEach((page, index) => {
-    const option = document.createElement('option');
-    option.value = String(index);
-    option.textContent = page.title;
-    stageJump.appendChild(option);
-  });
-  stageJump.value = String(currentPageIndex);
-}
-
-function showPage(index) {
-  if (!teacherStage || !audienceStage) return;
-  const teacherPages = [...teacherStage.querySelectorAll('.page')];
-  const audiencePages = [...audienceStage.querySelectorAll('.page')];
-  teacherPages.forEach((pageItem, i) => {
-    pageItem.style.display = i === index ? 'block' : 'none';
-  });
-  audiencePages.forEach((pageItem, i) => {
-    pageItem.style.display = i === index ? 'block' : 'none';
-  });
-
-  pageCanvases.forEach((canvas, i) => {
-    canvas.classList.toggle('active', i === index && annotatorEnabled);
-  });
-
-  if (stageJump) stageJump.value = String(index);
-  setStatus(`Stage ${index + 1}/${lesson.pages.length} • ${lesson.pages[index].title || ''}`);
-}
-
-function revealNextAnswer() {
-  const activeTeacherPage = getCurrentPageElement(teacherStage);
-  const activeAudiencePage = getCurrentPageElement(audienceStage);
-  if (!activeTeacherPage || !activeAudiencePage) return;
-
-  const teacherAnswers = [...activeTeacherPage.querySelectorAll('.answer')];
-  const audienceAnswers = [...activeAudiencePage.querySelectorAll('.answer')];
-  const shownCount = revealedAnswerCountByPage[currentPageIndex] || 0;
-  if (shownCount >= teacherAnswers.length) {
-    setStatus('All answers on this stage are already shown.');
-    return;
-  }
-
-  teacherAnswers[shownCount].classList.remove('hidden');
-  audienceAnswers[shownCount].classList.remove('audience-answer');
-  revealedAnswerCountByPage[currentPageIndex] = shownCount + 1;
-  persistSnapshot();
-}
-
-function initLesson(parsedLesson) {
-  lesson = parsedLesson;
-  currentPageIndex = 0;
-  revealedAnswerCountByPage = lesson.pages.map(() => 0);
-  buildPages();
-  showPage(currentPageIndex);
-  persistSnapshot();
-}
-
-function undoStroke() {
-  const pageState = annotationStateByPage[currentPageIndex];
-  if (!pageState || !pageState.strokes.length) return;
-  pageState.redoStack.push(pageState.strokes.pop());
-  redrawCanvas(currentPageIndex);
-  persistSnapshot();
-}
-
-function redoStroke() {
-  const pageState = annotationStateByPage[currentPageIndex];
-  if (!pageState || !pageState.redoStack.length) return;
-  pageState.strokes.push(pageState.redoStack.pop());
-  redrawCanvas(currentPageIndex);
-  persistSnapshot();
-}
-
-function setAudienceMode(enabled) {
-  document.body.classList.toggle('audience-mode', enabled);
-  document.body.classList.toggle('teacher-mode', !enabled);
-}
-
-function setBoardMode() {
-  document.body.classList.add('board-mode');
-  document.body.classList.remove('tablet-mode');
-}
-
-function setTabletMode() {
-  document.body.classList.add('tablet-mode');
-  document.body.classList.remove('board-mode');
-}
-
-function formatTime(seconds) {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-}
-
-function renderTimer() {
-  timerReadout.textContent = formatTime(remainingSeconds);
-  timerReadout.classList.toggle('timer-warning', remainingSeconds <= 10 && timerRunning);
-}
-
-function startTimer() {
-  const mins = Math.max(1, Number(timerMinutes.value) || 1);
-  remainingSeconds = mins * 60;
-  timerRunning = true;
-  if (timerInterval) clearInterval(timerInterval);
-  renderTimer();
-  timerInterval = window.setInterval(() => {
-    if (!timerRunning) return;
-    remainingSeconds = Math.max(0, remainingSeconds - 1);
-    renderTimer();
-    if (remainingSeconds === 0) {
-      timerRunning = false;
-      setStatus('Timer complete.');
-    }
-  }, 1000);
-}
-
-function pauseTimer() {
-  timerRunning = false;
-}
-
-function resetTimer() {
-  timerRunning = false;
-  remainingSeconds = (Math.max(1, Number(timerMinutes.value) || 1)) * 60;
-  renderTimer();
-}
-
 function launchPoll() {
-  const question = pollQuestion.value.trim() || 'Quick check: confidence level right now?';
-  participationHub.hidden = false;
-  pollCard.hidden = false;
-  pollCard.innerHTML = `<h4>Poll</h4><p>${question}</p><p><strong>Choices:</strong> ✅ Ready / 🤔 Need one more example / ❓ Confused</p>`;
+  const card=showActivity('pollCard','Quick poll',$('pollQuestion').value.trim()||'How confident do you feel?');
+  const options=element('div','poll-options');
+  ['Ready','One more example','Need help'].forEach(label=>{
+    let count=0;const button=element('button','',`${label} · 0`);button.addEventListener('click',()=>button.textContent=`${label} · ${++count}`);options.append(button);
+  });
+  card.append(options,element('p','helper','Tap a choice to tally a show of hands on this device.'));
 }
-
 function showExitTicket() {
-  const prompt = exitTicketPrompt.value.trim() || 'Exit ticket: What is one idea you can explain now?';
-  participationHub.hidden = false;
-  exitTicketCard.hidden = false;
-  exitTicketCard.innerHTML = `<h4>Exit Ticket</h4><p>${prompt}</p>`;
+  const card=showActivity('exitTicketCard','Exit ticket',$('exitTicketPrompt').value.trim()||'What is one idea you can explain now?');
+  const label=element('label','','Class reflection');label.htmlFor='exitResponse';
+  const response=element('textarea','response-input');response.id='exitResponse';response.placeholder='Capture a response together…';card.append(label,response);
 }
-
 function coldCallStudent() {
-  const picked = students[Math.floor(Math.random() * students.length)];
-  participationHub.hidden = false;
-  coldCallCard.hidden = false;
-  coldCallCard.innerHTML = `<h4>Cold-call</h4><p>${picked}, please share your thinking.</p>`;
+  roster=$('studentRoster').value.split('\n').map(name=>name.trim()).filter(Boolean);
+  if(!roster.length){setStatus('Add names to your class roster to pick a student.');$('studentRoster').focus();return;}
+  const name=roster[Math.floor(Math.random()*roster.length)];showActivity('coldCallCard','Student spotlight',`${name}, share your thinking with us.`);persistSnapshot();
 }
-
 function toggleMiniWhiteboards() {
-  miniWhiteboardsVisible = !miniWhiteboardsVisible;
-  buildPages();
-  showPage(currentPageIndex);
+  roster=$('studentRoster').value.split('\n').map(name=>name.trim()).filter(Boolean);
+  miniWhiteboardsVisible=!miniWhiteboardsVisible;
+  $('toggleMiniWhiteboardBtn').textContent=miniWhiteboardsVisible?'Hide response boards':'Show response boards';
+  buildPages();showPage(currentPageIndex);closeTools();persistSnapshot();
 }
-
+function queueSnapshot() {clearTimeout(snapshotTimeout);snapshotTimeout=setTimeout(persistSnapshot,500);}
 function persistSnapshot() {
-  const snapshot = {
-    lesson,
-    currentPageIndex,
-    revealedAnswerCountByPage,
-    annotationStateByPage,
-    lessonJson: lessonJsonInput.value
-  };
-  localStorage.setItem(OFFLINE_SNAPSHOT_KEY, JSON.stringify(snapshot));
+  try {
+    localStorage.setItem(OFFLINE_SNAPSHOT_KEY,JSON.stringify({lesson,currentPageIndex,revealedAnswerCountByPage,annotationStateByPage,lessonJson:$('lessonJson').value,roster,miniWhiteboardsVisible}));
+    $('saveIndicator').textContent='Saved on this device';
+  }catch(error){
+    $('saveIndicator').textContent='Session not saved';
+    if(!saveWarningShown){setStatus('Your browser could not save this session. Keep this tab open to retain your work.');saveWarningShown=true;}
+  }
 }
-
 function restoreSnapshotIfAvailable() {
-  const raw = localStorage.getItem(OFFLINE_SNAPSHOT_KEY);
-  if (!raw) return false;
-
   try {
-    const saved = JSON.parse(raw);
-    if (!saved.lesson || !Array.isArray(saved.lesson.pages)) return false;
-
-    lesson = saved.lesson;
-    lessonJsonInput.value = saved.lessonJson || lessonJsonInput.value;
-    currentPageIndex = Math.min(saved.currentPageIndex || 0, Math.max(0, lesson.pages.length - 1));
-    revealedAnswerCountByPage = Array.isArray(saved.revealedAnswerCountByPage)
-      ? saved.revealedAnswerCountByPage
-      : lesson.pages.map(() => 0);
-
-    buildPages();
-    if (Array.isArray(saved.annotationStateByPage) && saved.annotationStateByPage.length === lesson.pages.length) {
-      annotationStateByPage = saved.annotationStateByPage;
-      pageCanvases.forEach((_, index) => redrawCanvas(index));
+    const saved=JSON.parse(localStorage.getItem(OFFLINE_SNAPSHOT_KEY)||'null');
+    if(!saved?.lesson?.pages?.length||saved.lesson.pages.some(page=>!Array.isArray(page.questions)))return false;
+    lesson=saved.lesson;
+    // Enrich snapshots from the original app with the stage metadata it discarded.
+    if(saved.lessonJson&&lesson.pages[0].instructions===undefined){
+      try{const enriched=parseLesson(saved.lessonJson);if(enriched.pages.length===lesson.pages.length)lesson=enriched;}catch{/* Keep the usable saved lesson. */}
     }
-
-    showPage(currentPageIndex);
-    setStatus('Restored previous session from offline snapshot.');
-    return true;
-  } catch (error) {
-    setStatus(`Failed to restore offline snapshot: ${error.message}`);
-    return false;
-  }
+    $('lessonJson').value=saved.lessonJson||$('lessonJson').value;
+    revealedAnswerCountByPage=lesson.pages.map((_,i)=>Number(saved.revealedAnswerCountByPage?.[i])||0);
+    annotationStateByPage=lesson.pages.map((_,i)=>({strokes:list(saved.annotationStateByPage?.[i]?.strokes),redoStack:list(saved.annotationStateByPage?.[i]?.redoStack),images:list(saved.annotationStateByPage?.[i]?.images),responses:list(saved.annotationStateByPage?.[i]?.responses)}));
+    roster=list(saved.roster);$('studentRoster').value=roster.join('\n');miniWhiteboardsVisible=Boolean(saved.miniWhiteboardsVisible);
+    currentPageIndex=Math.max(0,Math.min(Number(saved.currentPageIndex)||0,lesson.pages.length-1));
+    renderOutline();buildPages();showPage(currentPageIndex);$('timerMinutes').value=lesson.pages[currentPageIndex].durationMinutes||5;resetTimer();
+    setStatus('Welcome back. Your lesson and stage progress have been restored.');return true;
+  }catch{return false;}
 }
-
-function syncOfflineBanner() {
-  const isOffline = !navigator.onLine;
-  offlineBanner.hidden = !isOffline;
-  if (isOffline) setStatus('Offline: working from local state.');
-}
-
-function registerServiceWorker() {
-  if (!('serviceWorker' in navigator)) return;
-  navigator.serviceWorker.register('./service-worker.js').catch(() => {
-    setStatus('Service worker registration failed; offline cache unavailable.');
-  });
-}
-
 function exportForPrint() {
-  const teacherPages = [...teacherStage.querySelectorAll('.page')];
-  const previousDisplay = teacherPages.map((pageItem) => pageItem.style.display);
-  const previousAnnotator = teacherPages.map((pageItem) => pageItem.classList.contains('hide-annotation-on-print'));
-
-  teacherPages.forEach((pageItem) => {
-    pageItem.style.display = 'block';
-    if (includeHiddenAnswersPrint.checked) {
-      pageItem.querySelectorAll('.answer').forEach((answer) => answer.classList.remove('hidden'));
-    }
-    if (!includeAnnotationsPrint.checked) {
-      pageItem.classList.add('hide-annotation-on-print');
-    }
+  closeTools();
+  const pages=[...$('teacherStage').children];
+  const displays=pages.map(page=>page.style.display);
+  const answerClasses=pages.map(page=>[...page.querySelectorAll('.answer')].map(answer=>answer.className));
+  const wasPresenting=document.body.classList.contains('audience-mode');const wasPreviewing=document.body.classList.contains('preview-mode');
+  document.body.classList.remove('audience-mode','preview-mode');
+  pages.forEach((page,index)=>{
+    page.style.display='block';page.classList.toggle('hide-annotation-on-print',!$('includeAnnotationsPrint').checked);
+    page.querySelectorAll('.answer').forEach((answer,i)=>answer.classList.toggle('hidden',!$('includeHiddenAnswersPrint').checked&&i>=(revealedAnswerCountByPage[index]||0)));
+    const canvas=pageCanvases[index];const rect=page.getBoundingClientRect();canvas.width=rect.width;canvas.height=rect.height;redrawCanvas(index);
   });
-
-  setTimeout(() => {
-    window.print();
-    teacherPages.forEach((pageItem, index) => {
-      pageItem.style.display = previousDisplay[index];
-      if (!previousAnnotator[index]) pageItem.classList.remove('hide-annotation-on-print');
-    });
-    showPage(currentPageIndex);
-  }, 50);
+  const restore=()=>{
+    pages.forEach((page,index)=>{page.style.display=displays[index];page.classList.remove('hide-annotation-on-print');page.querySelectorAll('.answer').forEach((answer,i)=>answer.className=answerClasses[index][i]);});
+    document.body.classList.toggle('audience-mode',wasPresenting);document.body.classList.toggle('preview-mode',wasPreviewing);resizeVisibleCanvases();
+  };
+  window.addEventListener('afterprint',restore,{once:true});
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{try{window.print();}finally{restore();}}));
 }
-
-loadLessonBtn.addEventListener('click', async () => {
-  try {
-    await ensureSchemaLoaded();
-    const parsed = parseLesson(lessonJsonInput.value);
-    if (!parsed.pages.length) {
-      setStatus('Lesson must include at least one stage/page.');
-      return;
-    }
-    initLesson(parsed);
-  } catch (error) {
-    setStatus(`Could not parse lesson JSON: ${error.message}`);
-  }
-});
-
-nextBtn.addEventListener('click', () => {
-  if (currentPageIndex < lesson.pages.length - 1) {
-    currentPageIndex += 1;
-    showPage(currentPageIndex);
-    persistSnapshot();
-  }
-});
-
-prevBtn.addEventListener('click', () => {
-  if (currentPageIndex > 0) {
-    currentPageIndex -= 1;
-    showPage(currentPageIndex);
-    persistSnapshot();
-  }
-});
-
-if (stageJump) {
-  stageJump.addEventListener('change', () => {
-    currentPageIndex = Number(stageJump.value);
-    showPage(currentPageIndex);
-    persistSnapshot();
-  });
+async function loadLesson() {
+  $('importError').hidden=true;
+  try{await ensureSchemaLoaded();const parsed=parseLesson($('lessonJson').value);initLesson(parsed);closeTools();}
+  catch(error){$('importError').textContent=error.message;$('importError').hidden=false;}
 }
-
-revealAnswerBtn.addEventListener('click', revealNextAnswer);
-
-penSize.addEventListener('input', () => {
-  selectedPenSize = Number(penSize.value);
-  penSizeValue.textContent = `${selectedPenSize} px`;
+$('lessonJson').value=JSON.stringify(sampleLesson,null,2);
+$('lessonPlanToggle').addEventListener('click',()=>{
+  if (lessonPanelState.pinned) closeLessonPanel();
+  else setLessonPanel({pinned:true});
 });
-
-toggleAnnotatorBtn.addEventListener('click', () => {
-  annotatorEnabled = !annotatorEnabled;
-  toggleAnnotatorBtn.textContent = annotatorEnabled ? 'Disable Annotator' : 'Enable Annotator';
-  pageCanvases.forEach((canvas, index) => {
-    canvas.classList.toggle('active', index === currentPageIndex && annotatorEnabled);
-  });
+$('closeLessonPlanBtn').addEventListener('click',closeLessonPanel);
+$('lessonNavigation').addEventListener('pointerenter',event=>{
+  if (event.pointerType === 'mouse') setLessonPanel({hovered:true});
 });
-
-undoAnnotationBtn.addEventListener('click', undoStroke);
-redoAnnotationBtn.addEventListener('click', redoStroke);
-
-clearPageAnnotationBtn.addEventListener('click', () => {
-  const pageState = annotationStateByPage[currentPageIndex];
-  if (!pageState) return;
-  pageState.strokes = [];
-  pageState.redoStack = [];
-  redrawCanvas(currentPageIndex);
-  persistSnapshot();
+$('lessonNavigation').addEventListener('pointerleave',()=>setLessonPanel({hovered:false}));
+$('lessonOutline').addEventListener('focusin',()=>setLessonPanel({focused:true}));
+$('lessonOutline').addEventListener('focusout',event=>{
+  if (!$('lessonOutline').contains(event.relatedTarget)) setLessonPanel({focused:false});
 });
-
-presenterViewBtn.addEventListener('click', () => setAudienceMode(false));
-audienceViewBtn.addEventListener('click', () => setAudienceMode(true));
-boardModeBtn.addEventListener('click', setBoardMode);
-tabletModeBtn.addEventListener('click', setTabletMode);
-
-startTimerBtn.addEventListener('click', startTimer);
-pauseTimerBtn.addEventListener('click', pauseTimer);
-resetTimerBtn.addEventListener('click', resetTimer);
-
-launchPollBtn.addEventListener('click', launchPoll);
-showExitTicketBtn.addEventListener('click', showExitTicket);
-coldCallBtn.addEventListener('click', coldCallStudent);
-toggleMiniWhiteboardBtn.addEventListener('click', toggleMiniWhiteboards);
-
-exportPdfBtn.addEventListener('click', exportForPrint);
-
-panelToolbarButtons.forEach((button) => {
-  button.addEventListener('click', () => {
-    if (document.body.classList.contains('panel-minimized')) {
-      togglePanelMinimized();
-    }
-    const targetId = button.dataset.target;
-    if (targetId) setActivePanelSection(targetId);
-  });
+document.addEventListener('click',event=>{
+  if (!$('lessonNavigation').contains(event.target)) setLessonPanel({pinned:false,hovered:false,focused:false});
 });
-
-if (togglePanelMinimizeBtn) togglePanelMinimizeBtn.addEventListener('click', togglePanelMinimized);
-if (panelPositionBtn) panelPositionBtn.addEventListener('click', togglePanelDockPosition);
-
-teacherStage.addEventListener('click', () => teacherStage.focus());
-document.addEventListener('paste', onPaste);
-
-window.addEventListener('online', syncOfflineBanner);
-window.addEventListener('offline', syncOfflineBanner);
-
-document.addEventListener('click', (event) => {
-  if (!controlPanel || !panelContent) return;
-  if (document.body.classList.contains('panel-minimized')) return;
-  const clickedInside = controlPanel.contains(event.target);
-  if (!clickedInside) closePanelOverlay();
+$('importBtn').addEventListener('click',()=>openTools('section-lesson'));
+$('closeDialogBtn').addEventListener('click',closeTools);
+$('toolsDialog').addEventListener('close',()=>dialogOpener?.focus());
+$('toolsDialog').addEventListener('click',event=>{if(event.target===$('toolsDialog')){const rect=$('toolsDialog').getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)closeTools();}});
+$('shortcutsBtn').addEventListener('click',()=>openTools('section-shortcuts'));
+$('penSettingsBtn').addEventListener('click',()=>openTools('section-annotator'));
+$('loadLessonBtn').addEventListener('click',loadLesson);
+$('sampleLessonBtn').addEventListener('click',()=>{$('lessonJson').value=JSON.stringify(sampleLesson,null,2);$('importError').hidden=true;});
+$('lessonFile').addEventListener('change',async event=>{
+  const file=event.target.files[0];if(!file)return;
+  try{$('lessonJson').value=await file.text();$('importError').hidden=true;setStatus(`${file.name} is ready to load.`);}catch{$('importError').textContent='This file could not be read. Try pasting the JSON instead.';$('importError').hidden=false;}
+  event.target.value='';
 });
-
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'ArrowRight') nextBtn.click();
-  if (event.key === 'ArrowLeft') prevBtn.click();
-  if (event.key.toLowerCase() === 'a') toggleAnnotatorBtn.click();
+document.querySelectorAll('.tool-launch[data-target]').forEach(button=>button.addEventListener('click',()=>openTools(button.dataset.target)));
+$('nextBtn').addEventListener('click',()=>goToStage(currentPageIndex+1));$('prevBtn').addEventListener('click',()=>goToStage(currentPageIndex-1));
+$('presentationNextBtn').addEventListener('click',()=>$('nextBtn').click());$('presentationPrevBtn').addEventListener('click',()=>$('prevBtn').click());
+$('revealAnswerBtn').addEventListener('click',revealNextAnswer);$('presentationRevealBtn').addEventListener('click',revealNextAnswer);
+$('hideAnswersBtn').addEventListener('click',()=>{revealedAnswerCountByPage[currentPageIndex]=0;syncAnswers();persistSnapshot();});
+$('startTimerBtn').addEventListener('click',startTimer);$('pauseTimerBtn').addEventListener('click',pauseTimer);$('resetTimerBtn').addEventListener('click',resetTimer);$('timerMinutes').addEventListener('change',resetTimer);
+$('presenterViewBtn').addEventListener('click',()=>setPreview(false));$('previewBtn').addEventListener('click',()=>setPreview(true));
+$('audienceViewBtn').addEventListener('click',()=>setAudienceMode(true));$('exitPresentBtn').addEventListener('click',()=>setAudienceMode(false));
+['board','tablet','standard'].forEach(mode=>$(mode+'ModeBtn').addEventListener('click',()=>setDisplayMode(mode)));
+$('boardPenBtn').addEventListener('click',()=>setAnnotation(!annotatorEnabled));
+$('toggleAnnotatorBtn').addEventListener('click',()=>{setAnnotation(!annotatorEnabled);closeTools();});$('finishDrawingBtn').addEventListener('click',()=>setAnnotation(false));
+$('penSize').addEventListener('input',()=>{selectedPenSize=Number($('penSize').value);$('penSizeValue').textContent=`${selectedPenSize} px`;});
+$('undoAnnotationBtn').addEventListener('click',undoStroke);$('quickUndoBtn').addEventListener('click',undoStroke);$('redoAnnotationBtn').addEventListener('click',redoStroke);$('quickRedoBtn').addEventListener('click',redoStroke);
+$('clearPageAnnotationBtn').addEventListener('click',()=>{const state=annotationStateByPage[currentPageIndex];if(!state)return;state.redoStack.push(...state.strokes.reverse());state.strokes=[];redrawCanvas(currentPageIndex);syncDrawing();persistSnapshot();});
+$('launchPollBtn').addEventListener('click',launchPoll);$('showExitTicketBtn').addEventListener('click',showExitTicket);$('coldCallBtn').addEventListener('click',coldCallStudent);$('toggleMiniWhiteboardBtn').addEventListener('click',toggleMiniWhiteboards);
+$('studentRoster').addEventListener('input',()=>{roster=$('studentRoster').value.split('\n').map(name=>name.trim()).filter(Boolean);queueSnapshot();});
+$('closeActivityBtn').addEventListener('click',()=>$('participationHub').hidden=true);
+$('exportPdfBtn').addEventListener('click',exportForPrint);
+document.addEventListener('paste',onPaste);
+document.addEventListener('keydown',event=>{
+  if(event.key==='Escape'&&!$('toolsDialog').open){if(document.body.classList.contains('lesson-plan-open')){closeLessonPanel();return;}if(document.body.classList.contains('audience-mode'))setAudienceMode(false);else setAnnotation(false);return;}
+  if(event.target.closest('input,textarea,select,[contenteditable]')||$('toolsDialog').open||event.ctrlKey||event.metaKey||event.altKey)return;
+  if(event.key==='ArrowRight'){event.preventDefault();goToStage(currentPageIndex+1);}
+  if(event.key==='ArrowLeft'){event.preventDefault();goToStage(currentPageIndex-1);}
+  if(event.key.toLowerCase()==='r'){event.preventDefault();revealNextAnswer();}
+  if(event.key.toLowerCase()==='a'&&!document.body.classList.contains('audience-mode')){event.preventDefault();setAnnotation(!annotatorEnabled);}
 });
-
-(async () => {
-  createColorSwatches();
-  setActivePanelSection('section-lesson');
-  openPanelOverlay();
-  registerServiceWorker();
-  syncOfflineBanner();
-
-  renderTimer();
-  resetTimer();
-
-  if (restoreSnapshotIfAvailable()) return;
-
-  try {
-    await ensureSchemaLoaded();
-    initLesson(parseLesson(lessonJsonInput.value));
-  } catch (error) {
-    setStatus(`Startup validation failed: ${error.message}`);
-  }
+function syncOfflineBanner() {$('offlineBanner').hidden=navigator.onLine;}
+window.addEventListener('online',syncOfflineBanner);window.addEventListener('offline',syncOfflineBanner);
+window.addEventListener('pagehide',()=>{if(lesson.pages.length)persistSnapshot();});
+(async()=>{
+  createColorSwatches();syncOfflineBanner();
+  try{await ensureSchemaLoaded();if(!restoreSnapshotIfAvailable())initLesson(parseLesson($('lessonJson').value));}
+  catch(error){setStatus(`Could not start: ${error.message}`);}
+  if('serviceWorker'in navigator)navigator.serviceWorker.register('./service-worker.js').catch(()=>setStatus('Offline app caching is unavailable. Your lesson can still save on this device.'));
 })();
