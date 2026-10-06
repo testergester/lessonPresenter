@@ -1928,13 +1928,89 @@ body.preview-mode .app-shell {grid-template-columns:var(--left-sidebar-space) mi
 body.audience-mode .app-shell {grid-template-columns:minmax(0,1fr);}
 .workspace-heading {flex-wrap:wrap;}
 @media(max-width:680px) {
-  .app-shell {display:flex;flex-direction:column;}
-  .lesson-navigation,.teaching-navigation {position:relative;top:auto;width:100%;height:auto;min-height:48px;display:flex;border:0;border-bottom:1px solid var(--line);}
-  .lesson-navigation {order:0;}
-  .workspace {order:1;}
-  .teaching-navigation {order:2;}
-  .lesson-plan-toggle,.teacher-panel-toggle {width:48px;min-height:48px;height:48px;padding:12px;gap:0;margin:0;}
+  .app-shell {display:grid;grid-template-columns:1fr 1fr;align-items:start;}
+  .lesson-navigation,.teaching-navigation {display:contents;}
+  .lesson-plan-toggle,.teacher-panel-toggle {position:sticky;top:0;z-index:16;grid-row:1;width:48px;min-height:48px;height:48px;padding:12px;gap:0;margin:0;background:#fff;border:1px solid var(--line);border-radius:8px;}
+  .lesson-plan-toggle {grid-column:1;justify-self:start;}
+  .teacher-panel-toggle {grid-column:2;justify-self:end;}
   .lesson-plan-toggle>span:last-child,.teacher-panel-toggle>span:last-child {display:none;}
-  .lesson-navigation .lesson-sidebar,.teaching-navigation .teaching-sidebar,body.board-mode .teaching-navigation .teaching-sidebar {inset:0 auto auto 48px;width:calc(100vw - 48px);height:auto;max-height:55dvh;}
-  body.lesson-plan-pinned .lesson-navigation .lesson-sidebar,body.teacher-panel-pinned .teaching-navigation .teaching-sidebar {position:relative;inset:auto;width:calc(100% - 48px);height:auto;}
+  .workspace {grid-column:1/-1;grid-row:4;}
+  .lesson-navigation .lesson-sidebar,.teaching-navigation .teaching-sidebar,body.board-mode .teaching-navigation .teaching-sidebar,
+  body.lesson-plan-pinned .lesson-navigation .lesson-sidebar,body.teacher-panel-pinned .teaching-navigation .teaching-sidebar {display:none;position:static;inset:auto;grid-column:1/-1;width:100%;height:auto;max-height:55dvh;box-shadow:none;transform:none;}
+  .lesson-navigation .lesson-sidebar {grid-row:2;}
+  .teaching-navigation .teaching-sidebar {grid-row:3;}
+  body.lesson-plan-open .lesson-navigation .lesson-sidebar,body.teacher-panel-open .teaching-navigation .teaching-sidebar {display:flex;}
+  body.audience-mode .app-shell {grid-template-columns:minmax(0,1fr);}
+}
+
+.animation-sequence {padding:0;list-style:none;display:grid;gap:10px;margin-top:18px;}
+.animation-sequence li {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:13px;}
+#section-animations select,#section-animations input {display:block;width:100%;padding:10px;margin:6px 0 14px;}
+.animation-playback:not([hidden]) {display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:12px;font-size:12px;}
+body.audience-mode .animation-playback {display:none;}
+
+.animation-effect-description {flex:1;min-width:0;}
+.animation-row-actions {display:flex;align-items:center;gap:5px;flex-shrink:0;}
+.animation-drag-handle {cursor:grab;font-size:22px;color:var(--muted);}
+.animation-sequence li.dragging {opacity:.5;}
+.animation-sequence li.drop-target {outline:2px solid var(--green);outline-offset:2px;}
+@media(max-width:480px) {.animation-sequence li {flex-wrap:wrap;gap:8px;} .animation-row-actions {margin-left:auto;} .animation-effect-description {flex-basis:calc(100% - 36px);}}
+
+.animation-effect-metadata {font-size:12px;color:var(--muted);}
+.animation-target-previews {display:grid;gap:6px;margin-top:7px;}
+.animation-target-preview {display:flex;align-items:center;gap:8px;min-width:0;}
+.animation-target-thumbnail {width:48px;height:36px;object-fit:contain;flex-shrink:0;border:1px solid var(--line);border-radius:4px;background:#fff;}
+.animation-target-text {font-size:13px;line-height:1.4;overflow:hidden;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+.animation-more-targets {font-size:12px;color:var(--muted);}
+
+/* Compact, grouped board controls. Labels remain available on hover and focus. */
+.board-dock.compact-dock {
+  display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:7px 9px;
+}
+.compact-dock .presentation-controls,
+.compact-dock .insert-tools,
+.compact-dock .board-tools {
+  display:flex;flex:0 1 auto;align-items:center;flex-wrap:wrap;gap:3px;
+  margin:0;padding:0;border:0;min-width:0;
+}
+.compact-dock .insert-tools,.compact-dock .board-tools {
+  border-left:1px solid var(--line);padding-left:9px;
+}
+.compact-dock .stage-progress {flex:0 1 auto;width:90px;margin:0 5px;}
+.compact-dock .stage-progress>span {font-size:10px;}
+.compact-dock .progress-track {margin-top:4px;}
+.compact-dock .presentation-controls button,
+.compact-dock .insert-tools button,
+.compact-dock .board-tools button {
+  position:relative;display:inline-flex;align-items:center;justify-content:center;
+  flex:0 0 36px;width:36px;height:36px;min-width:36px;min-height:36px;
+  padding:7px;border:1px solid transparent;border-radius:7px;background:transparent;
+  color:var(--green);box-shadow:none;
+}
+.compact-dock button svg {width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+.compact-dock .presentation-controls #nextBtn {background:var(--green);color:white;}
+.compact-dock button:not(:disabled):hover {background:#edf3e8;border-color:#dce3d8;}
+.compact-dock .presentation-controls #nextBtn:hover {background:#326250;}
+.compact-dock button[aria-pressed="true"],.compact-dock button.selected {background:#e5eedc;border-color:#b3c8a0;}
+.compact-dock button:disabled {opacity:.4;}
+.compact-dock button:focus-visible {outline:2px solid var(--green);outline-offset:2px;}
+.compact-dock [data-tooltip]::after {
+  content:attr(data-tooltip);position:absolute;bottom:calc(100% + 8px);left:50%;
+  transform:translateX(-50%);z-index:20;padding:6px 9px;border-radius:6px;
+  background:#203c32;color:white;font-size:11px;font-weight:500;line-height:1.4;
+  white-space:nowrap;pointer-events:none;visibility:hidden;opacity:0;
+}
+.compact-dock [data-tooltip]:hover::after,
+.compact-dock [data-tooltip]:focus-visible::after {visibility:visible;opacity:1;}
+.compact-dock .selection-inspector {
+  order:4;flex-basis:100%;margin:0;padding:6px 8px;border-top:1px solid var(--line);
+}
+.compact-dock .drawing-toolbar {order:5;flex-basis:100%;margin:0;padding:6px 0 0;}
+@media(pointer:coarse) {
+  .compact-dock .presentation-controls button,.compact-dock .insert-tools button,.compact-dock .board-tools button {flex-basis:44px;width:44px;height:44px;min-width:44px;min-height:44px;}
+}
+@media(max-width:680px) {
+  .board-dock.compact-dock {gap:6px;padding:6px;}
+  .compact-dock .insert-tools,.compact-dock .board-tools {padding-left:5px;}
+  .compact-dock .stage-progress {width:75px;}
 }

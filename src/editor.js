@@ -1,7 +1,10 @@
 import {Canvas, StaticCanvas, Textbox, Rect, Circle, Triangle, Line, FabricImage, FabricObject, PencilBrush, ActiveSelection, util} from 'fabric';
 import {SLIDE_WIDTH as W, SLIDE_HEIGHT as H, fitSlide, youtubeId, validateDocument} from './document.js';
+import {createSticker,upgradeStickers} from './stickers.js';
+import {AnimationPlayer} from './animations.js';
+import {StyledImage,DEFAULT_IMAGE_STYLE} from './image.js';
 
-const CUSTOM = ['lpId','lpRole','lpAnswerIndex','lpVideoId','lpAnnotation','lpLabel'];
+const CUSTOM = ['lpId','lpRole','lpAnswerIndex','lpVideoId','lpAnnotation','lpLabel','lpSticker','lpImageRadius'];
 FabricObject.customProperties = CUSTOM;
 FabricObject.ownDefaults.originX='left';
 FabricObject.ownDefaults.originY='top';
@@ -10,6 +13,12 @@ FabricObject.ownDefaults.borderColor = '#244d40';
 FabricObject.ownDefaults.transparentCorners = false;
 FabricObject.ownDefaults.cornerSize = 10;
 const uid = () => crypto.randomUUID();
+export class SharpCanvas extends Canvas {
+  getRetinaScaling() {
+    if(!this.enableRetinaScaling)return 1;
+    return Math.max(2,typeof window==='undefined'?super.getRetinaScaling():window.devicePixelRatio||1);
+  }
+}
 const textValue = value => typeof value === 'string' ? value : value?.text || value?.prompt || JSON.stringify(value);
 const common = {fontFamily:'Arial',fill:'#293c35',originX:'left',originY:'top',objectCaching:false};
 function textbox(text, x, y, width, size = 26, properties = {}) {
@@ -47,13 +56,13 @@ export function stageToSlide(stage) {
 
 export class SlideEditor {
   constructor(host, {onChange,onSelection,onHistory,onError,onTitleChange}) {
-    this.host=host;this.callbacks={onChange,onSelection,onHistory,onError,onTitleChange};
+    this.host=host;this.callbacks={onChange,onSelection,onHistory,onError,onTitleChange};this.zoom=1;
     this.slides=[];this.histories=[];this.index=-1;this.ready=false;this.loading=false;this.readonly=false;this.preview=false;this.revealCount=0;this.token=0;
     this.queue=Promise.resolve();
     host.classList.add('fabric-board');
     const canvasElement=document.createElement('canvas');canvasElement.setAttribute('aria-label','Editable lesson slide. Use the board toolbar to add content.');
     host.append(canvasElement);
-    this.canvas=new Canvas(canvasElement,{width:W,height:H,backgroundColor:'#fffefb',preserveObjectStacking:true,selection:true,stopContextMenu:true,fireRightClick:false});
+    this.canvas=new SharpCanvas(canvasElement,{width:W,height:H,enableRetinaScaling:true,imageSmoothingEnabled:true,backgroundColor:'#fffefb',preserveObjectStacking:true,selection:true,stopContextMenu:true,fireRightClick:false});
     this.canvas.freeDrawingBrush=new PencilBrush(this.canvas);
     this.canvas.freeDrawingBrush.color='#e11d48';this.canvas.freeDrawingBrush.width=4;
     this.summary=document.createElement('div');this.summary.className='canvas-accessibility';this.summary.setAttribute('aria-live','polite');host.append(this.summary);
@@ -73,8 +82,8 @@ export class SlideEditor {
     this.resize();
   }
   setLesson(slides) {
-    ++this.token;this.ready=false;this.index=-1;this.slides=structuredClone(slides);
-    this.histories=slides.map(slide=>({undo:[JSON.stringify(slide)],redo:[]}));
+    ++this.token;this.ready=false;this.index=-1;this.slides=structuredClone(slides).map(slide=>upgradeStickers(slide,CUSTOM));
+    this.histories=this.slides.map(slide=>({undo:[JSON.stringify(slide)],redo:[]}));
   }
   reorderSlides(order) {
     this.snapshot();++this.token;this.ready=false;this.index=-1;
@@ -83,6 +92,7 @@ export class SlideEditor {
   }
   async show(index,revealCount=0) {
     this.snapshot();
+    this.stopAnimations();
     const token=++this.token;
     this.revealCount=revealCount;this.ready=false;this.loading=true;
     this.media.replaceChildren();this.host.setAttribute('aria-busy','true');
@@ -94,6 +104,8 @@ export class SlideEditor {
         await this.canvas.loadFromJSON(scene);
         if(token!==this.token)return;
         this.index=index;this.loading=false;this.ready=true;
+        this.animations=structuredClone(scene.lpAnimations||[]);
+        if(this.readonly)this.startAnimations();
         this.applyVisibility();this.updateSummary();this.applyInteraction();this.resize();this.syncMedia();this.selectionChanged();this.historyChanged();
       }catch(error){if(token===this.token){this.loading=false;this.callbacks.onError('This slide could not be loaded. '+error.message);}}
       finally{if(token===this.token)this.host.setAttribute('aria-busy','false');}
@@ -102,6 +114,8 @@ export class SlideEditor {
   }
   serialize() {
     const scene=this.canvas.toObject(CUSTOM);
+    scene.lpAnimations=structuredClone(this.animations||[]);
+    scene.objects.forEach(object=>{const base=this.animationBase?.get(object.lpId);if(base){object.visible=base.visible;object.opacity=base.opacity;}});
     // Reveal is session state. Save all answer objects so hidden answers are never lost.
     const normalize=objects=>objects.forEach(object=>{if(object.lpRole==='answer')object.visible=true;if(object.objects)normalize(object.objects);});
     normalize(scene.objects);return scene;
@@ -130,7 +144,9 @@ export class SlideEditor {
     const title=this.canvas.getObjects().find(object=>object.lpRole==='title');if(title)this.callbacks.onTitleChange?.(index,title.text);
   }
   setMode({readonly=this.readonly,preview=this.preview,drawing=false}={}) {
+    const changed=readonly!==this.readonly;
     this.readonly=readonly;this.preview=preview;this.drawing=drawing;
+    if(changed&&this.ready){if(readonly)this.startAnimations();else this.stopAnimations();}
     if(this.readonly)this.canvas.discardActiveObject();
     this.applyInteraction();this.syncMedia();this.canvas.requestRenderAll();
   }
@@ -142,8 +158,52 @@ export class SlideEditor {
   }
   setReveal(count) {this.revealCount=count;this.applyVisibility();}
   applyVisibility() {
-    this.canvas.getObjects().forEach(object=>{if(object.lpRole==='answer')object.set('visible',object.lpAnswerIndex<this.revealCount);});
+    this.canvas.getObjects().forEach(object=>{
+      const base=this.animationBase?.get(object.lpId),value=this.animationValues?.get(object.lpId)??1;
+      if(base){object.set({visible:base.visible&&value>0,opacity:base.opacity*value});}
+      if(object.lpRole==='answer')object.set('visible',object.lpAnswerIndex<this.revealCount&&(!base||value>0));
+    });
     this.canvas.requestRenderAll();this.updateSummary();
+  }
+  startAnimations() {
+    this.stopAnimations();
+    this.animationBase=new Map(this.canvas.getObjects().map(object=>[object.lpId,{visible:object.lpRole==='answer'?true:object.visible,opacity:object.opacity}]));
+    this.player=new AnimationPlayer(this.animations||[],values=>{this.animationValues=values;this.applyVisibility();this.syncMedia();});
+  }
+  stopAnimations() {
+    this.player?.stop();this.player=null;
+    this.canvas.getObjects().forEach(object=>{const base=this.animationBase?.get(object.lpId);if(base)object.set(base);});
+    this.animationBase=null;this.animationValues=null;
+    this.applyVisibility();this.syncMedia();
+  }
+  nextAnimation() {return !!this.player?.next();}
+  addAnimation(effect,trigger,delay=0,grouping='together') {
+    const objects=this.canvas.getActiveObjects();if(this.readonly||!objects.length)return false;
+    objects.forEach(object=>{object.lpId ||= uid();});
+    this.animations||=[];
+    if(grouping==='individual'){
+      const selected=new Set(objects);
+      const ordered=this.canvas.getObjects().filter(object=>selected.has(object));
+      ordered.forEach((object,index)=>this.animations.push({id:uid(),effect,trigger:index===0||trigger==='click'?trigger:'after',delay,targets:[object.lpId]}));
+    }else this.animations.push({id:uid(),effect,trigger,delay,targets:objects.map(object=>object.lpId)});
+    this.commit();return true;
+  }
+  removeAnimation(id){if(this.readonly)return;this.animations=(this.animations||[]).filter(effect=>effect.id!==id);this.commit();}
+  moveAnimation(id,to) {
+    const from=(this.animations||[]).findIndex(effect=>effect.id===id);
+    if(this.readonly||from<0||!Number.isInteger(to)||to<0||to>=this.animations.length||from===to)return false;
+    this.animations.splice(to,0,this.animations.splice(from,1)[0]);this.commit();return true;
+  }
+  animationTargets(effect) {
+    const objects=new Map(this.canvas.getObjects().map(object=>[object.lpId,object]));
+    return effect.targets.map(id=>{
+      const object=objects.get(id);
+      if(!object)return {label:'Removed object'};
+      if(typeof object.text==='string')return {label:object.text.trim()||'Empty text box'};
+      if(object.type?.toLowerCase()==='image')return {label:object.lpLabel||'Image',image:object.getSrc()};
+      if(object.lpVideoId)return {label:`YouTube video · ${object.lpVideoId}`};
+      return {label:object.lpLabel||`${object.type.charAt(0).toUpperCase()}${object.type.slice(1)}`};
+    });
   }
   updateSummary() {
     const objects=this.canvas.getObjects();
@@ -154,12 +214,21 @@ export class SlideEditor {
   resize() {
     const parent=this.host.parentElement;
     const presentation=document.body.classList.contains('audience-mode');
-    const maxHeight=presentation?Math.max(220,window.innerHeight-130):Infinity;
-    const {scale,width,height}=fitSlide(parent.clientWidth,maxHeight);
+    const studio=document.body.dataset?.layout==='studio';
+    const style=studio?getComputedStyle(parent):null;
+    const maxHeight=presentation?Math.max(220,window.innerHeight-130):studio?Math.max(120,parent.clientHeight-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom)):Infinity;
+    const padding=studio?parseFloat(style.paddingLeft)+parseFloat(style.paddingRight):0;
+    const fitted=fitSlide(Math.max(120,parent.clientWidth-padding),maxHeight);
+    const zoom=studio&&!presentation?(this.zoom||1):1;
+    const scale=fitted.scale*zoom,width=fitted.width*zoom,height=fitted.height*zoom;
     this.scale=scale;
     this.canvas.setDimensions({width,height});this.canvas.setViewportTransform([scale,0,0,scale,0,0]);
     this.host.style.width=`${width}px`;this.host.style.height=`${height}px`;
     this.syncMedia();
+  }
+  setZoom(value) {
+    const number=Number(value);if(!Number.isFinite(number))return;
+    this.zoom=Math.max(.25,Math.min(3,number));this.resize();
   }
   add(object) {
     if(!this.ready||this.readonly)return;
@@ -171,22 +240,29 @@ export class SlideEditor {
     const shapes={rectangle:()=>new Rect({...options,width:300,height:170,rx:10,ry:10}),circle:()=>new Circle({...options,radius:95}),triangle:()=>new Triangle({...options,width:220,height:190}),line:()=>new Line([0,0,310,0],{...options,stroke:'#244d40',strokeWidth:5})};
     if(shapes[type])this.add(shapes[type]());
   }
-  addSticker(sticker) {this.add(textbox(sticker,220,180,160,100,{lpLabel:'Sticker'}));}
+  addSticker(symbol) {const sticker=createSticker(symbol);if(sticker)this.add(sticker);}
   async addImage(file,point={x:160,y:150}) {
     if(!this.ready||this.readonly)return;
     if(file.size>20*1024*1024)throw new Error('Choose an image smaller than 20 MB.');
     if(!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(file.type))throw new Error('Choose a PNG, JPEG, WebP, GIF, or SVG image.');
     const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file);});
-    const token=this.token;const image=await FabricImage.fromURL(data);
+    const token=this.token;const image=await StyledImage.fromURL(data);
     if(token!==this.token||!this.ready)return;
-    const scale=Math.min(1,600/image.width,420/image.height);image.set({left:point.x,top:point.y,scaleX:scale,scaleY:scale});this.add(image);
+    const scale=Math.min(1,600/image.width,420/image.height);image.set({...DEFAULT_IMAGE_STYLE,left:point.x,top:point.y,scaleX:scale,scaleY:scale});this.add(image);
   }
   addVideo(url) {
     const id=youtubeId(url);if(!id)throw new Error('Paste a valid YouTube watch, shorts, or share link.');
     this.add(new Rect({left:160,top:160,width:640,height:360,fill:'#223d34',rx:8,ry:8,lpVideoId:id,lpLabel:'YouTube video'}));
   }
   selected() {return this.canvas.getActiveObject();}
-  selectionChanged() {const object=this.selected();this.callbacks.onSelection?.(object ? {type:object.lpVideoId?'video':object.type,text:'text'in object,fontSize:object.fontSize||36,fontFamily:object.fontFamily||'Arial',fill:typeof object.fill==='string'?object.fill:'#244d40',fontWeight:object.fontWeight||'normal',fontStyle:object.fontStyle||'normal',textAlign:object.textAlign||'left'} : null);}
+  selectAll() {
+    if(this.readonly||!this.ready)return;
+    const objects=this.canvas.getObjects().filter(object=>object.visible!==false);
+    this.canvas.discardActiveObject();
+    if(objects.length)this.canvas.setActiveObject(objects.length===1?objects[0]:new ActiveSelection(objects,{canvas:this.canvas}));
+    this.canvas.requestRenderAll();
+  }
+  selectionChanged() {const object=this.selected();this.callbacks.onSelection?.(object ? {image:object instanceof FabricImage,stroke:object.stroke||'#cbd3df',strokeWidth:object.strokeWidth||0,imageRadius:object.lpImageRadius||0,type:object.lpVideoId?'video':object.lpSticker?'sticker':object.type,text:'text'in object,fontSize:object.fontSize||36,fontFamily:object.fontFamily||'Arial',fill:typeof object.fill==='string'?object.fill:'#244d40',fontWeight:object.fontWeight||'normal',fontStyle:object.fontStyle||'normal',textAlign:object.textAlign||'left'} : null);}
   updateSelected(properties) {const object=this.selected();if(!object||this.readonly||!this.ready)return;object.set(properties);object.setCoords();this.canvas.requestRenderAll();this.commit();this.selectionChanged();}
   deleteSelection() {if(this.readonly||!this.ready||this.selected()?.isEditing)return;this.canvas.remove(...this.canvas.getActiveObjects());this.canvas.discardActiveObject();this.commit();}
   selectedObjectsData() {
@@ -240,7 +316,7 @@ export class SlideEditor {
         });
         poster.append(label,link,play);node.append(poster);this.media.append(node);
       }
-      Object.assign(node.style,{left:`${object.left*this.scale}px`,top:`${object.top*this.scale}px`,width:`${object.width*object.scaleX*this.scale}px`,height:`${object.height*object.scaleY*this.scale}px`,transform:`rotate(${object.angle||0}deg)`,transformOrigin:'0 0',pointerEvents:this.readonly?'auto':'none'});
+      Object.assign(node.style,{opacity:String(object.opacity),left:`${object.left*this.scale}px`,top:`${object.top*this.scale}px`,width:`${object.width*object.scaleX*this.scale}px`,height:`${object.height*object.scaleY*this.scale}px`,transform:`rotate(${object.angle||0}deg)`,transformOrigin:'0 0',pointerEvents:this.readonly?'auto':'none'});
       node.querySelector('button')?.toggleAttribute('hidden',!this.readonly);
       if(!this.readonly&&node.querySelector('iframe')){node.remove();activeIds.delete(object.lpId);}
     });
@@ -258,7 +334,7 @@ export class SlideEditor {
       canvas.getObjects().filter(object=>object.lpVideoId).forEach(object=>{
         canvas.add(textbox(`YouTube video\nhttps://youtu.be/${object.lpVideoId}`,object.left+20,object.top+25,Math.max(120,object.getScaledWidth()-40),24,{fill:'#fff'}));
       });
-      output.push(canvas.toDataURL({format:'png',multiplier:1}));await canvas.dispose();
+      output.push(canvas.toDataURL({format:'png',multiplier:2}));await canvas.dispose();
     }
     return output;
   }

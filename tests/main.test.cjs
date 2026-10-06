@@ -17,7 +17,7 @@ function app() {
   function node(id) {
     return nodes[id] ||= {value: '8', textContent: '', hidden: false, children: [], attributes: {}, classList: classList(), setAttribute(name, value) { this.attributes[name] = value; }};
   }
-  const context = vm.createContext({document: {getElementById: node, querySelectorAll:()=>[], body: {classList: classList()}}, console,
+  const context = vm.createContext({document: {events:{},addEventListener(name,fn){(this.events[name]||=[]).push(fn);},getElementById: node, querySelectorAll:()=>[], body: {classList: classList()}}, console,
     Date: {now: () => now}, setInterval: fn => {tick=fn;intervalActive=true;return 1;}, clearInterval() {intervalActive=false;}, setTimeout, clearTimeout,
     localStorage: {setItem() {}}, structuredClone, DOCUMENT_FORMAT:"lesson-presenter", saveSession:async()=>{}, requestAnimationFrame() {}});
   vm.runInContext(source, context);
@@ -166,5 +166,41 @@ test('both sidebars preview on hover, close on leave, and remain open when pinne
     assert.equal(a.context.document.body.classList.contains(left?'lesson-plan-pinned':'teacher-panel-pinned'),false);
     panel.events.focusin({target:{matches:()=>true}});assert.equal(toggle.attributes['aria-expanded'],'true');
     panel.events.focusout({relatedTarget:null});assert.equal(toggle.attributes['aria-expanded'],'false');
+    toggle.events.click();
+    nav.contains=target=>target===panel;
+    a.context.document.events.click.forEach(handler=>handler({target:panel}));
+    assert.equal(toggle.attributes['aria-expanded'],'true');
+    a.context.document.events.click.forEach(handler=>handler({target:a.node('teacherStage')}));
+    assert.equal(toggle.attributes['aria-expanded'],'false');assert.equal(toggle.attributes['aria-pressed'],'false');
   }
+});
+test('Studio routes tools to its docked panel while the original workspace keeps its dialog',()=>{
+  const a=app();
+  a.context.document.body.dataset={layout:'studio'};
+  a.context.CustomEvent=class {constructor(type,options){this.type=type;this.detail=options.detail;}};
+  let routed,opened=0;
+  a.context.document.dispatchEvent=event=>{routed=event;return false;};
+  a.node('toolsDialog').showModal=()=>opened++;
+  a.run("openTools('section-animations')");
+  assert.equal(routed.type,'studio:open-tool');assert.equal(routed.detail.target,'section-animations');assert.equal(opened,0);
+  a.context.document.body.dataset={};
+  a.run("openTools('section-shapes')");
+  assert.equal(opened,1);assert.equal(a.node('dialogTitle').textContent,'Add a shape');
+});
+test('teacher guidance edits update the active lesson, survive saving and stay separate by slide',async()=>{
+  const a=app();a.run("lesson={title:'Notes',pages:[{title:'One',questions:[],aim:'Old aim',teacherNotes:['Old reminder']},{title:'Two',questions:[],aim:'Second aim',teacherNotes:[]}]};boardEditor={documentSlides:()=>[{objects:[]},{objects:[]}]};");
+  a.run('queueSnapshot=()=>{}');
+  assert.equal(a.run("updateStageGuidance('aim','Compare two examples.\\nExplain the difference.')"),true);
+  assert.equal(a.run("updateStageGuidance('teacherNotes','Give thinking time.\\n\\nCheck quieter students.')"),true);
+  a.run('currentPageIndex=1');
+  a.run("updateStageGuidance('teacherNotes','Leave two minutes for review.')");
+  const doc=JSON.parse(a.run('JSON.stringify(currentDocument())'));
+  assert.equal(doc.lesson.pages[0].aim,'Compare two examples.\nExplain the difference.');
+  assert.deepEqual(doc.lesson.pages[0].teacherNotes,['Give thinking time.','Check quieter students.']);
+  assert.deepEqual(doc.lesson.pages[1].teacherNotes,['Leave two minutes for review.']);
+  assert.equal(doc.lesson.pages[1].aim,'Second aim');
+  a.run("document.body.classList.toggle('preview-mode',true)");
+  assert.equal(a.run("updateStageGuidance('aim','Student edit')"),false);
+  assert.equal(a.run("updateStageGuidance('title','Wrong field')"),false);
+  assert.equal(a.run('lesson.pages[1].aim'),'Second aim');
 });

@@ -4,10 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#244d40" />
-  <title>Lesson Presenter · Teaching workspace</title>
+  <title>Lesson Presenter · Studio</title>
   <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/studio.css" />
 </head>
-<body>
+<body data-layout="studio" class="studio">
   <div id="offlineBanner" class="offline-banner" hidden>You're offline. Your lesson is saved on this device.</div>
   <a class="skip-link" href="#teacherStage">Skip to lesson</a>
   <header class="app-header">
@@ -73,6 +74,6 @@
     <section id="section-shortcuts" class="feature-section"><p class="section-description">Keep your attention on the class.</p><dl class="shortcut-list"><div><dt>Save editable lesson</dt><dd><kbd>Ctrl / Cmd + S</kbd></dd></div><div><dt>Undo / redo</dt><dd><kbd>Ctrl / Cmd + Z</kbd> <kbd>Shift + Z</kbd></dd></div><div><dt>Previous / next stage</dt><dd><kbd>←</kbd> <kbd>→</kbd></dd></div><div><dt>Reveal next answer</dt><dd><kbd>R</kbd></dd></div><div><dt>Toggle annotation pen</dt><dd><kbd>A</kbd></dd></div><div><dt>Exit presentation / close tools</dt><dd><kbd>Esc</kbd></dd></div></dl><p class="helper">Shortcuts pause while you’re typing or using a dialog.</p></section>
   </div></dialog>
   <div id="printSlides" aria-hidden="true"></div>
-  <script type="module" src="/main.js"></script>
+  <script type="module" src="/studio.js"></script>
 </body>
 </html>

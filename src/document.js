@@ -32,7 +32,7 @@ export function validateDocument(doc, {assetsAllowed=false}={}) {
     if (object.lpVideoId && !/^[a-zA-Z0-9_-]{11}$/.test(object.lpVideoId)) throw new Error('A video link is invalid.');
     if ((object.fill && typeof object.fill !== 'string') || (object.stroke && typeof object.stroke !== 'string')) throw new Error('Unsupported canvas fill or stroke.');
     if (object.src && !/^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,/i.test(object.src) && !(assetsAllowed && object.src.startsWith('assets/'))) throw new Error('Images must be included inside the lesson file.');
-    ['left','top','width','height','scaleX','scaleY','angle'].forEach(key => {
+    ['left','top','width','height','scaleX','scaleY','angle','lpImageRadius','strokeWidth'].forEach(key => {
       if (object[key] !== undefined && !Number.isFinite(object[key])) throw new Error('A canvas object has invalid geometry.');
     });
     if (object.objects) object.objects.forEach(inspect);
@@ -41,6 +41,10 @@ export function validateDocument(doc, {assetsAllowed=false}={}) {
   doc.slides.forEach(slide => {
     if (!slide || !Array.isArray(slide.objects) || slide.objects.length > 5000) throw new Error('A slide is invalid or too large.');
     slide.objects.forEach(inspect);
+    if(slide.lpAnimations!==undefined){
+      if(!Array.isArray(slide.lpAnimations)||slide.lpAnimations.length>1000)throw new Error('Invalid animation sequence.');
+      for(const effect of slide.lpAnimations)if(!effect||typeof effect.id!=='string'||!['appear','disappear'].includes(effect.effect)||!['click','after','with'].includes(effect.trigger)||!Array.isArray(effect.targets)||!effect.targets.length||effect.targets.length>5000||effect.targets.some(id=>typeof id!=='string')||!Number.isFinite(effect.delay)||effect.delay<0||effect.delay>60000)throw new Error('Invalid animation effect or timing.');
+    }
     // Fabric can load images from these properties too; they are never part of our document format.
     if (slide.backgroundImage || slide.overlayImage || slide.clipPath) throw new Error('Unsupported slide background.');
   });

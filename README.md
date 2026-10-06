@@ -59,7 +59,7 @@ A nonempty `stages` array is required. Known fields are type-checked. Stages sor
 - Undo/redo restores object edits, deletions, and drawings within the current lesson. Downloaded lessons retain their final layout, not edit history.
 - Use **＋ Slide** or **Duplicate** in the lesson outline to add stages. Editing a generated title updates the outline label.
 - Drag slides in the lesson outline, or use their up/down buttons, to reorder. Hide/Show excludes a slide from student preview, presentation, and PDF without deleting it. Hidden slides and their order are preserved in saved lessons.
-- Both the lesson-plan rail on the left and teacher-tools rail on the right preview on hover and close when the pointer leaves. Click a rail to pin it and resize the canvas to fit beside it; click again or use its close button to collapse it. Hover previews remain temporary overlays. On small screens pinned panels stack with the workspace. Clicking the board keeps pinned panels open. Student preview hides the teacher-tools rail.
+- Both the lesson-plan rail on the left and teacher-tools rail on the right preview on hover and close when the pointer leaves. Click a rail to pin it and resize the canvas to fit beside it; click again or use its close button to collapse it. Hover previews remain temporary overlays. On small screens both toggles stay at the top while open panels expand above the workspace. Clicking outside a sidebar closes it, including when pinned. Student preview hides the teacher-tools rail.
 - Student preview locks slide objects and hides teacher guidance. You can still annotate with the pen. Presentation uses the same slide scene, with clear navigation and an exit button.
 - YouTube players become interactive in student preview or presentation when you click **Play video**. They require internet access and depend on the video's embedding permissions. They do not autoplay.
 - Teacher timers follow stage durations and support pause/resume. Poll tallies, exit tickets, roster selection, and response boards operate on this device; there is no remote student connection.
@@ -81,7 +81,7 @@ The working session autosaves to IndexedDB on this browser and origin, including
 
 Edit, student preview, and presentation share one scene. Answer reveal changes visibility without deleting hidden answers from the saved document.
 
-Print / save PDF renders every visible slide with options for answers and annotations. PDF is a static image of each slide; video objects become a labeled placeholder with the YouTube link. Presentation state is not changed by export. Use the app's Export PDF action rather than the browser's direct Print shortcut to prepare the slide images.
+Print / save PDF renders every visible slide with options for answers and annotations. PDF uses a 2560 × 1440 static image of each slide; video objects become a labeled placeholder with the YouTube link. Presentation state is not changed by export. Use the app's Export PDF action rather than the browser's direct Print shortcut to prepare the slide images.
 
 ## Shortcuts
 
@@ -101,3 +101,25 @@ Shortcuts defer to input fields and active text editing.
 ## Checks
 
 Automated tests cover existing lesson import, metadata and answers, timer behavior, preview/drawing modes, storage failures, canvas scaling, YouTube URL handling, packaged asset validation, deduplication, and editable lesson round trips. Production build validates the bundled Fabric.js integration and generates the offline asset cache.
+
+Canvas rendering uses at least 2× resolution and follows higher-density displays. Built-in stickers are vector shapes; existing built-in emoji stickers upgrade automatically while retaining their placement and size. Uploaded bitmap images retain their original resolution.
+
+## Object animations
+
+Select one or more objects (Shift-click or drag a selection box), open **Animations**, and add **Appear** or **Disappear**. Choose **Together** to animate the selection as one effect, or **One at a time** to create an effect per object in slide layer order (back to front). With One at a time, On click requires a click per object; automatic timing starts the first object as chosen and runs subsequent objects After previous. Delay applies to each object. Choose **On click**, **With previous**, or **After previous**, with an optional delay. Each transition lasts 0.3 seconds. Automatic effects at the start of a sequence run when the slide opens; after an On click effect, following automatic effects run as scheduled until the next On click step.
+
+Effects play in Student preview and Present. Click the board, press Space while the board is focused, or use **Next effect**. Stage navigation remains separate. Student preview also has **Replay effects**. Returning to Teacher restores normal editing visibility. The Animations list lets you drag effects or use up/down buttons to reorder them, and remove effects. Relative start timing follows the new preceding effect; editing undo/redo also covers animation changes. Sequences are included in JSON/ZIP saves and slide duplication. PDF exports are static and show the authored content, subject to the answer and annotation export options.
+
+## Alternate Studio interface
+
+Open `/studio.html` for the presentation editor layout inspired by PPTist: fixed top toolbar, slide thumbnails and organization on the left, and Design / Animations / Teach panels on the right. Top toolbar tools open compact dropdowns directly beneath their buttons. Object properties stay in the right panel; its Animations tab opens the full effect list. Dropdowns close on outside click, Escape, or completion of an insert action. Import and keyboard help retain their dialogs. Panel buttons at the top let you reclaim canvas space.
+
+The original `/index.html` interface remains available. Both entries use the same Fabric editor, lesson JSON/ZIP format and local saved session. The production build includes both HTML entries and caches both for offline use.
+
+Studio image properties include border color, border width (0 removes it), and corner radius (0 gives square corners). New pasted, uploaded and dropped images receive a 2px border and 16px corners. Frames remain editable, support undo/redo, and persist in JSON/ZIP and PDF output. Existing images retain their previous appearance until edited.
+
+In Studio, Board view expands the canvas by hiding the slide list, Compact view adds canvas margins, and Standard view restores the usual panels and margins. Teacher notes sit beneath the canvas, with a centered footer toggle; student preview and presentation hide them.
+
+Studio's top-right controls zoom out, zoom in, or fit the slide to the workspace. Zoom ranges from 25% to 300% relative to the fitted view, in 25% steps. Scroll to reach any part of an enlarged slide. Zoom changes only the view; saved object positions, sizes, presentation and PDF output retain the original slide geometry.
+
+Stage Aim and Keep in Mind in Studio's notes area are editable text fields. Changes autosave to the local session and are included in downloaded JSON/ZIP lessons. Use one line per reminder in Keep in Mind. Notes belong to each slide and remain hidden in student preview and presentation.

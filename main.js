@@ -257,6 +257,7 @@ function closeGuidancePanel() {
   if($('teacherPanel').contains(document.activeElement))$('teacherPanelToggle').focus();
 }
 function bindSidebar({navigation,panel,toggle,close,state,set,hide}) {
+  if(document.body.dataset?.layout==='studio')return;
   $(toggle).addEventListener('click',()=>state.pinned?hide():set({pinned:true}));
   $(close).addEventListener('click',hide);
   $(navigation).addEventListener('pointerenter',event=>{if(event.pointerType==='mouse')set({hovered:true,focused:false});});
@@ -264,10 +265,17 @@ function bindSidebar({navigation,panel,toggle,close,state,set,hide}) {
   $(panel).addEventListener('focusin',event=>{if(event.target.matches(':focus-visible'))set({focused:true});});
   $(panel).addEventListener('focusout',event=>{if(!$(panel).contains(event.relatedTarget))set({focused:false});});
   $(navigation).addEventListener('pointerdown',()=>set({focused:false}));
+  document.addEventListener('click',event=>{
+    if((state.pinned||state.hovered||state.focused)&&!$(navigation).contains(event.target))hide();
+  },true);
 }
 function setStatus(message) { $('status').textContent = message; }
 function openTools(target) {
-  const titles = {'section-lesson':'Import lesson','section-annotator':'Annotate your lesson','section-participation':'Bring everyone in','section-view':'Display settings','section-export':'Export your lesson','section-shortcuts':'Keyboard shortcuts','section-shapes':'Add a shape','section-stickers':'Add a sticker','section-video':'Embed a YouTube video'};
+  const titles = {'section-animations':'Slide animations','section-lesson':'Import lesson','section-annotator':'Annotate your lesson','section-participation':'Bring everyone in','section-view':'Display settings','section-export':'Export your lesson','section-shortcuts':'Keyboard shortcuts','section-shapes':'Add a shape','section-stickers':'Add a sticker','section-video':'Embed a YouTube video'};
+  if(document.body.dataset?.layout==='studio'){
+    const event=new CustomEvent('studio:open-tool',{cancelable:true,detail:{target,title:titles[target]}});
+    if(!document.dispatchEvent(event))return;
+  }
   document.querySelectorAll('.feature-section').forEach(section=>section.classList.toggle('active',section.id===target));
   $('dialogTitle').textContent = titles[target];
   if (!$('toolsDialog').open) {
@@ -275,7 +283,10 @@ function openTools(target) {
     $('toolsDialog').showModal();
   }
 }
-function closeTools() { $('toolsDialog').close(); }
+function closeTools() {
+  $('toolsDialog').close();
+  if(document.body.dataset?.layout==='studio')document.dispatchEvent(new CustomEvent('studio:close-tool'));
+}
 function noteGroup(heading, entries, ordered = false) {
   if (!entries.length) return null;
   const group = element('div','note-group');
@@ -285,13 +296,36 @@ function noteGroup(heading, entries, ordered = false) {
   group.append(content);
   return group;
 }
+function updateStageGuidance(field,value,page=lesson.pages[currentPageIndex]) {
+  if(studentMode()||!page||!lesson.pages.includes(page)||!['aim','teacherNotes'].includes(field))return false;
+  if(field==='aim')page.aim=String(value);
+  else page.teacherNotes=String(value).split('\n').map(line=>line.trim()).filter(Boolean);
+  queueSnapshot();return true;
+}
+function editableGuidance(heading,field,page,placeholder) {
+  const group=element('div','note-group note-editable');
+  const id=field==='aim'?'stageAimInput':'stageNotesInput';
+  const label=element('label','note-editor-label',heading);label.htmlFor=id;
+  const input=element('textarea','note-editor');input.id=id;input.rows=3;
+  input.setAttribute('aria-label',field==='aim'?'Stage aim':'Keep in mind');
+  input.placeholder=placeholder;
+  input.value=field==='aim'?page.aim||'':list(page.teacherNotes).map(displayText).join('\n');
+  input.readOnly=studentMode();
+  input.addEventListener('input',()=>updateStageGuidance(field,input.value,page));
+  group.append(label,input);return group;
+}
 function renderGuidance(page) {
   const container = $('teacherNotes');
   container.replaceChildren();
-  const aim = element('div','note-group');
-  aim.append(element('h4','','STAGE AIM'),element('p','',page.aim || 'Guide students through the activity.'));
-  container.append(aim);
-  [noteGroup('How to run it',list(page.procedure),true),noteGroup('Keep in mind',list(page.teacherNotes)),noteGroup('Pacing',list(page.timingNotes))].filter(Boolean).forEach(group=>container.append(group));
+  const studio=document.body.dataset?.layout==='studio';
+  if(studio){
+    container.append(editableGuidance('STAGE AIM','aim',page,'Add the goal for this stage…'),editableGuidance('KEEP IN MIND','teacherNotes',page,'Add reminders, one per line…'));
+  }else{
+    const aim = element('div','note-group');
+    aim.append(element('h4','','STAGE AIM'),element('p','',page.aim || 'Guide students through the activity.'));
+    container.append(aim);
+  }
+  [noteGroup('How to run it',list(page.procedure),true),!studio&&noteGroup('Keep in mind',list(page.teacherNotes)),noteGroup('Pacing',list(page.timingNotes))].filter(Boolean).forEach(group=>container.append(group));
   if (list(page.anticipatedProblems).length) {
     const group = element('div','note-group');
     group.append(element('h4','','IF STUDENTS GET STUCK'));
@@ -368,7 +402,9 @@ function syncAnswers() {
   boardEditor?.setReveal(shown);
   const total = answerTotal();
   $('revealAnswerBtn').disabled = $('presentationRevealBtn').disabled = shown >= total;
-  $('revealAnswerBtn').textContent = total ? shown >= total ? 'Answers revealed' : `Reveal answer · ${shown}/${total}` : 'No answers';
+  const answerLabel = total ? shown >= total ? 'Answers revealed' : `Reveal answer · ${shown}/${total}` : 'No answers';
+  $('revealAnswerBtn').setAttribute('aria-label', answerLabel);
+  $('revealAnswerBtn').setAttribute('data-tooltip', answerLabel);
   $('hideAnswersBtn').hidden = shown === 0;
 }
 function resizeVisibleCanvases() { boardEditor?.resize(); }
@@ -396,6 +432,7 @@ function showPage(index) {
   $('suggestedTime').textContent = `${page.durationMinutes || 5} min planned`;
   renderGuidance(page);syncAnswers();syncDrawing();
   requestAnimationFrame(resizeVisibleCanvases);
+  notifyStudio();
 }
 function goToStage(index) {
   if (index < 0 || index >= lesson.pages.length || index === currentPageIndex || studentMode()&&lesson.pages[index].hidden) return;
@@ -476,6 +513,7 @@ function setDisplayMode(mode) {
   document.body.classList.toggle('board-mode',mode==='board');
   document.body.classList.toggle('tablet-mode',mode==='tablet');
   ['board','tablet','standard'].forEach(type=>$(type+'ModeBtn').setAttribute('aria-pressed',String(type===mode)));
+  if(document.body.dataset?.layout==='studio')document.dispatchEvent(new CustomEvent('studio:display-mode',{detail:{mode}}));
   closeTools();requestAnimationFrame(resizeVisibleCanvases);
 }
 function syncDrawing() {
@@ -487,10 +525,12 @@ function syncDrawing() {
   $('boardPenBtn').classList.toggle('selected',annotatorEnabled);
   $('boardPenBtn').setAttribute('aria-pressed',String(annotatorEnabled));
   document.body.classList.toggle('annotation-active',annotatorEnabled);
-  $('toggleAnnotatorBtn').textContent=annotatorEnabled?'Disable pen':'Enable pen';
+  $('toggleAnnotatorBtn').textContent=annotatorEnabled?(document.body.dataset?.layout==='studio'?'Done drawing':'Disable pen'):'Enable pen';
   $('toggleAnnotatorBtn').setAttribute('aria-pressed',String(annotatorEnabled));
   document.querySelectorAll('[data-editor-action]').forEach(button=>button.disabled=presenting||preview||button.dataset?.unavailable==='true');
   $('selectionInspector').hidden=presenting||preview||!boardEditor?.selected();
+  $('animationPlayback').hidden=!(preview&&!presenting);
+  $('presentationAnimateBtn').hidden=!presenting;
 }
 function setAnnotation(enabled) {annotatorEnabled=enabled;syncDrawing();}
 function createColorSwatches() {
@@ -551,7 +591,7 @@ function toggleMiniWhiteboards() {
   $('toggleMiniWhiteboardBtn').textContent=miniWhiteboardsVisible?'Hide response boards':'Show response boards';
   renderResponseBoards();closeTools();persistSnapshot();
 }
-function queueSnapshot() {clearTimeout(snapshotTimeout);snapshotTimeout=setTimeout(persistSnapshot,500);}
+function queueSnapshot() {notifyStudio();clearTimeout(snapshotTimeout);snapshotTimeout=setTimeout(persistSnapshot,500);}
 function currentDocument() {
   return {format:DOCUMENT_FORMAT,version:1,lesson:structuredClone(lesson),slides:boardEditor.documentSlides(),revealedAnswerCountByPage:[...revealedAnswerCountByPage],roster:[...roster]};
 }
@@ -636,9 +676,49 @@ function addStage(duplicate=false) {
   const index=currentPageIndex+1;lesson.pages.splice(index,0,page);slides.splice(index,0,scene);revealedAnswerCountByPage.splice(index,0,0);annotationStateByPage.splice(index,0,{responses:[]});
   boardEditor.setLesson(slides);renderOutline();showPage(index);$('timerMinutes').value=page.durationMinutes;resetTimer();persistSnapshot();
 }
+function renderAnimations() {
+  const selected=boardEditor.canvas.getActiveObjects().length;
+  $('animationSelection').textContent=`${selected} object${selected===1?'':'s'} selected`;
+  $('applyAnimationBtn').disabled=boardEditor.readonly||!selected;
+  $('animationSequence').replaceChildren();
+  (boardEditor.animations||[]).forEach((effect,index)=>{
+    const row=element('li');row.dataset.effectId=effect.id;row.tabIndex=-1;row.draggable=!boardEditor.readonly;
+    const handle=element('span','animation-drag-handle','⠿');handle.title='Drag to reorder effect';handle.setAttribute('aria-hidden','true');
+    const description=element('div','animation-effect-description');
+    description.append(element('span','animation-effect-metadata',`${index+1}. ${effect.effect==='appear'?'Appear':'Disappear'} · ${effect.targets.length} object(s) · ${{click:'On click',after:'After previous',with:'With previous'}[effect.trigger]}${effect.delay?` · ${effect.delay/1000}s delay`:''}`));
+    const previews=element('div','animation-target-previews');
+    const targets=boardEditor.animationTargets(effect);
+    targets.slice(0,4).forEach(target=>{
+      const preview=element('div','animation-target-preview');
+      if(target.image){const image=element('img','animation-target-thumbnail');image.src=target.image;image.alt=target.label;image.draggable=false;preview.append(image);}
+      const label=element('span','animation-target-text',target.label);label.title=target.label;preview.append(label);previews.append(preview);
+    });
+    if(targets.length>4)previews.append(element('span','animation-more-targets',`+ ${targets.length-4} more objects`));
+    description.append(previews);row.append(handle,description);
+    const actions=element('div','animation-row-actions');
+    const move=(delta,label,symbol)=>{const button=element('button','icon-button',symbol);button.type='button';button.setAttribute('aria-label',`Move effect ${index+1} ${label}`);button.disabled=boardEditor.readonly||index+delta<0||index+delta>=boardEditor.animations.length;button.addEventListener('click',()=>reorderAnimation(effect.id,index+delta));actions.append(button);};
+    move(-1,'up','↑');move(1,'down','↓');
+    const remove=element('button','text-button','Remove');remove.disabled=boardEditor.readonly;remove.setAttribute('aria-label',`Remove effect ${index+1}`);remove.addEventListener('click',()=>{boardEditor.removeAnimation(effect.id);renderAnimations();});actions.append(remove);row.append(actions);
+    row.addEventListener('dragstart',event=>{if(boardEditor.readonly){event.preventDefault();return;}event.dataTransfer.setData('application/x-lesson-effect',effect.id);event.dataTransfer.effectAllowed='move';row.classList.add('dragging');});
+    row.addEventListener('dragover',event=>{if(boardEditor.readonly||!event.dataTransfer.types.includes('application/x-lesson-effect'))return;event.preventDefault();event.dataTransfer.dropEffect='move';row.classList.add('drop-target');});
+    row.addEventListener('dragleave',()=>row.classList.remove('drop-target'));
+    row.addEventListener('dragend',()=>{$('animationSequence').querySelectorAll('li').forEach(node=>node.classList.remove('dragging','drop-target'));});
+    row.addEventListener('drop',event=>{event.preventDefault();row.classList.remove('drop-target');reorderAnimation(event.dataTransfer.getData('application/x-lesson-effect'),index);});
+    $('animationSequence').append(row);
+  });
+  if(!boardEditor.animations?.length)$('animationSequence').append(element('li','','No effects on this slide yet.'));
+}
+function reorderAnimation(id,to) {
+  if(!boardEditor.moveAnimation(id,to))return;
+  renderAnimations();
+  [...$('animationSequence').children].find(row=>row.dataset.effectId===id)?.focus();
+  setStatus(`Animation moved to position ${to+1}.`);
+}
+function advanceEffect(){if(!boardEditor.nextAnimation())setStatus('All effects on this slide have finished.');}
 function renderSelection(selection) {
   $('selectionInspector').hidden=!selection||boardEditor.readonly;
   if(!selection)return;
+  if(document.body.dataset?.layout==='studio')document.dispatchEvent(new CustomEvent('studio:selection',{detail:selection}));
   $('selectedType').textContent=selection.type;
   $('textFormatting').hidden=!selection.text;
   $('objectColor').value=/^#[0-9a-f]{6}$/i.test(selection.fill)?selection.fill:'#244d40';
@@ -671,7 +751,10 @@ $('startTimerBtn').addEventListener('click',startTimer);$('pauseTimerBtn').addEv
 $('presenterViewBtn').addEventListener('click',()=>setPreview(false));$('previewBtn').addEventListener('click',()=>setPreview(true));
 $('audienceViewBtn').addEventListener('click',()=>setAudienceMode(true));$('exitPresentBtn').addEventListener('click',()=>setAudienceMode(false));
 ['board','tablet','standard'].forEach(mode=>$(mode+'ModeBtn').addEventListener('click',()=>setDisplayMode(mode)));
-$('boardPenBtn').addEventListener('click',()=>setAnnotation(!annotatorEnabled));
+$('boardPenBtn').addEventListener('click',()=>{
+  if(document.body.dataset?.layout==='studio'){if(!annotatorEnabled)setAnnotation(true);openTools('section-annotator');}
+  else setAnnotation(!annotatorEnabled);
+});
 $('toggleAnnotatorBtn').addEventListener('click',()=>{setAnnotation(!annotatorEnabled);closeTools();});$('finishDrawingBtn').addEventListener('click',()=>setAnnotation(false));
 $('penSize').addEventListener('input',()=>{selectedPenSize=Number($('penSize').value);$('penSizeValue').textContent=`${selectedPenSize} px`;boardEditor?.setPen(selectedColor,selectedPenSize);});
 $('undoAnnotationBtn').addEventListener('click',undoStroke);$('quickUndoBtn').addEventListener('click',undoStroke);$('redoAnnotationBtn').addEventListener('click',redoStroke);$('quickRedoBtn').addEventListener('click',redoStroke);
@@ -684,6 +767,7 @@ document.addEventListener('paste',onPaste);
 document.addEventListener('keydown',event=>{
   if(event.key==='Escape'&&!$('toolsDialog').open){if(document.body.classList.contains('lesson-plan-open')||document.body.classList.contains('teacher-panel-open')){closeLessonPanel();closeGuidancePanel();return;}if(document.body.classList.contains('audience-mode'))setAudienceMode(false);else setAnnotation(false);return;}
   if(event.target.closest('input,textarea,select,[contenteditable]')||$('toolsDialog').open||boardEditor.selected()?.isEditing)return;
+  if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='a'&&!studentMode()){event.preventDefault();boardEditor.selectAll();return;}
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();saveLessonFile();return;}
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){event.preventDefault();event.shiftKey?redoStroke():undoStroke();return;}
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='c'&&boardEditor.selected()){event.preventDefault();boardEditor.copySelection().catch(()=>setStatus('Copy is unavailable in this browser. Use Duplicate instead.'));return;}
@@ -691,6 +775,7 @@ document.addEventListener('keydown',event=>{
   if(event.ctrlKey||event.metaKey||event.altKey)return;
   if((event.key==='Delete'||event.key==='Backspace')&&boardEditor.selected()){event.preventDefault();boardEditor.deleteSelection();return;}
   if(boardEditor.selected()&&!boardEditor.readonly&&event.key.startsWith('Arrow')){event.preventDefault();const object=boardEditor.selected();const step=event.shiftKey?10:1;boardEditor.updateSelected({left:object.left+(event.key==='ArrowRight'?step:event.key==='ArrowLeft'?-step:0),top:object.top+(event.key==='ArrowDown'?step:event.key==='ArrowUp'?-step:0)});return;}
+  if(event.code==='Space'&&studentMode()&&!event.target.closest('button')){event.preventDefault();advanceEffect();return;}
   if(event.key==='ArrowRight'){event.preventDefault();navigateStage(1);}
   if(event.key==='ArrowLeft'){event.preventDefault();navigateStage(-1);}
   if(event.key.toLowerCase()==='r'){event.preventDefault();revealNextAnswer();}
@@ -704,13 +789,18 @@ boardEditor=new SlideEditor($('teacherStage'),{
   onHistory:state=>{['undoAnnotationBtn','quickUndoBtn','editorUndoBtn'].forEach(id=>$(id).disabled=!state.undo);['redoAnnotationBtn','quickRedoBtn','editorRedoBtn'].forEach(id=>$(id).disabled=!state.redo);},
   onError:setStatus,onTitleChange:(index,title)=>{if(lesson.pages[index]&&lesson.pages[index].title!==title){lesson.pages[index].title=title;renderOutline();$('stageBreadcrumb').textContent=title;}}
 });
+$('animationsBtn').addEventListener('click',()=>{renderAnimations();openTools('section-animations');});
+$('applyAnimationBtn').addEventListener('click',()=>{if(boardEditor.addAnimation($('animationEffect').value,$('animationTrigger').value,Math.max(0,Math.min(60,Number($('animationDelay').value)||0))*1000,$('animationGrouping').value)){renderAnimations();setStatus('Animation added. Open Student preview to play it.');}});
+$('nextEffectBtn').addEventListener('click',advanceEffect);$('presentationAnimateBtn').addEventListener('click',advanceEffect);
+$('replayEffectsBtn').addEventListener('click',()=>boardEditor.startAnimations());
+$('teacherStage').addEventListener('click',event=>{if(studentMode()&&!annotatorEnabled&&!event.target.closest('button,iframe'))advanceEffect();});
 $('saveLessonBtn').addEventListener('click',()=>saveLessonFile());
 $('saveCompactBtn').addEventListener('click',()=>saveLessonFile(true));
 $('addStageBtn').addEventListener('click',()=>addStage(false));$('duplicateStageBtn').addEventListener('click',()=>addStage(true));
 $('addTextBtn').addEventListener('click',()=>{setAnnotation(false);boardEditor.addText();});
-$('addShapeBtn').addEventListener('click',()=>openTools('section-shapes'));
-$('addStickerBtn').addEventListener('click',()=>openTools('section-stickers'));
-$('addVideoBtn').addEventListener('click',()=>openTools('section-video'));
+$('addShapeBtn').addEventListener('click',()=>{setAnnotation(false);openTools('section-shapes');});
+$('addStickerBtn').addEventListener('click',()=>{setAnnotation(false);openTools('section-stickers');});
+$('addVideoBtn').addEventListener('click',()=>{setAnnotation(false);openTools('section-video');});
 $('insertVideoBtn').addEventListener('click',()=>{try{boardEditor.addVideo($('youtubeUrl').value);$('videoError').hidden=true;closeTools();}catch(error){$('videoError').hidden=false;$('videoError').textContent=error.message;}});
 $('addImageBtn').addEventListener('click',()=>$('imageFile').click());
 $('imageFile').addEventListener('change',async event=>{const file=event.target.files[0];if(file){try{await boardEditor.addImage(file);}catch(error){setStatus(error.message);}}event.target.value='';});
@@ -733,3 +823,7 @@ $('objectForwardBtn').addEventListener('click',()=>boardEditor.moveLayer(true));
   catch(error){setStatus(`Could not start: ${error.message}`);}
   if(import.meta.env.PROD&&'serviceWorker'in navigator)navigator.serviceWorker.register('./service-worker.js').catch(()=>setStatus('Offline app caching is unavailable. Your lesson can still save on this device.'));
 })();
+
+// The alternate HTML uses the same lesson engine and saved document format.
+function notifyStudio(){if(document.body.dataset?.layout==='studio')document.dispatchEvent(new CustomEvent('studio:update'));}
+export function getStudioState(){return {lesson,index:currentPageIndex,editor:boardEditor};}
