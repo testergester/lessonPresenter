@@ -1,8 +1,14 @@
-import {Canvas, StaticCanvas, Textbox, Rect, Circle, Triangle, Line, FabricImage, FabricObject, PencilBrush, ActiveSelection, util} from 'fabric';
+import {Canvas, StaticCanvas, Textbox, Rect, Circle, Triangle, Line, FabricImage, FabricObject, PencilBrush, ActiveSelection, Group, util} from 'fabric';
 import {SLIDE_WIDTH as W, SLIDE_HEIGHT as H, fitSlide, youtubeId, validateDocument} from './document.js';
 import {createSticker,upgradeStickers} from './stickers.js';
 import {AnimationPlayer} from './animations.js';
 import {StyledImage,DEFAULT_IMAGE_STYLE} from './image.js';
+import {VideoRect,visibleVideos,topObjectAt,videoTransform} from './video.js';
+import {paintableObjects,selectionPaint,paintProperty} from './selection.js';
+import {imageURL} from './image-url.js';
+
+const descendants = objects => objects.flatMap(object=>[object,...descendants(object.getObjects?.()||[])]);
+const serializedDescendants = objects => objects.flatMap(object=>[object,...serializedDescendants(object.objects||[])]);
 
 const CUSTOM = ['lpId','lpRole','lpAnswerIndex','lpVideoId','lpAnnotation','lpLabel','lpSticker','lpImageRadius'];
 FabricObject.customProperties = CUSTOM;
@@ -12,6 +18,9 @@ FabricObject.ownDefaults.cornerColor = '#244d40';
 FabricObject.ownDefaults.borderColor = '#244d40';
 FabricObject.ownDefaults.transparentCorners = false;
 FabricObject.ownDefaults.cornerSize = 10;
+function corsImages(objects){
+  for(const object of objects||[]){if(imageURL(object.src))object.crossOrigin='anonymous';corsImages(object.objects);if(object.clipPath)corsImages([object.clipPath]);}
+}
 const uid = () => crypto.randomUUID();
 export class SharpCanvas extends Canvas {
   getRetinaScaling() {
@@ -55,8 +64,8 @@ export function stageToSlide(stage) {
 }
 
 export class SlideEditor {
-  constructor(host, {onChange,onSelection,onHistory,onError,onTitleChange}) {
-    this.host=host;this.callbacks={onChange,onSelection,onHistory,onError,onTitleChange};this.zoom=1;
+  constructor(host, {onChange,onSelection,onHistory,onError,onTitleChange,onPlayback}) {
+    this.host=host;this.callbacks={onChange,onSelection,onHistory,onError,onTitleChange,onPlayback};this.zoom=1;
     this.slides=[];this.histories=[];this.index=-1;this.ready=false;this.loading=false;this.readonly=false;this.preview=false;this.revealCount=0;this.token=0;
     this.queue=Promise.resolve();
     host.classList.add('fabric-board');
@@ -67,8 +76,19 @@ export class SlideEditor {
     this.canvas.freeDrawingBrush.color='#e11d48';this.canvas.freeDrawingBrush.width=4;
     this.summary=document.createElement('div');this.summary.className='canvas-accessibility';this.summary.setAttribute('aria-live','polite');host.append(this.summary);
     this.media=document.createElement('div');this.media.className='media-layer';host.append(this.media);
+    this.videoControls=document.createElement('div');this.videoControls.className='video-playback-controls';this.videoControls.hidden=true;
+    this.videoSelect=document.createElement('select');this.videoSelect.setAttribute('aria-label','Choose a slide video');
+    const play=document.createElement('button');play.type='button';play.textContent='Play video';play.addEventListener('click',()=>this.playVideo(this.videoSelect.value));
+    this.videoControls.append(this.videoSelect,play);host.append(this.videoControls);
+    this.videoControls.addEventListener('click',event=>event.stopPropagation());
+    host.addEventListener('click',event=>{
+      if(!this.readonly||this.drawing||!this.ready||event.target.closest('button,select,iframe,.media-layer'))return;
+      const object=topObjectAt(this.canvas.getObjects(),this.canvas.getScenePoint(event));
+      if(object?.lpVideoId){event.stopImmediatePropagation();this.playVideo(object.lpId);}
+    },true);
     ['object:modified','text:editing:exited','path:created'].forEach(event=>this.canvas.on(event,()=>{
       if(event==='path:created')this.canvas.getObjects().filter(o=>o.type==='path'&&!o.lpId).forEach(o=>{o.lpId=uid();o.lpAnnotation=true;});
+      if(this.readonly&&event==='path:created')this.recordAnnotations();
       this.commit();
     }));
     ['selection:created','selection:updated','selection:cleared'].forEach(event=>this.canvas.on(event,()=>this.selectionChanged()));
@@ -83,6 +103,8 @@ export class SlideEditor {
   }
   setLesson(slides) {
     ++this.token;this.ready=false;this.index=-1;this.slides=structuredClone(slides).map(slide=>upgradeStickers(slide,CUSTOM));
+    this.slides.forEach(slide=>corsImages(slide.objects));
+    this.annotationHistories=[];
     this.histories=this.slides.map(slide=>({undo:[JSON.stringify(slide)],redo:[]}));
   }
   reorderSlides(order) {
@@ -95,7 +117,7 @@ export class SlideEditor {
     this.stopAnimations();
     const token=++this.token;
     this.revealCount=revealCount;this.ready=false;this.loading=true;
-    this.media.replaceChildren();this.host.setAttribute('aria-busy','true');
+    this.playingVideoId=null;this.media.replaceChildren();this.videoControls.hidden=true;this.host.setAttribute('aria-busy','true');
     this.canvas.selection=false;this.canvas.skipTargetFind=true;this.canvas.isDrawingMode=false;
     const scene=structuredClone(this.slides[index]);
     this.queue=this.queue.catch(()=>{}).then(async()=>{
@@ -105,7 +127,7 @@ export class SlideEditor {
         if(token!==this.token)return;
         this.index=index;this.loading=false;this.ready=true;
         this.animations=structuredClone(scene.lpAnimations||[]);
-        if(this.readonly)this.startAnimations();
+        if(this.readonly){this.ensureAnnotationHistory();this.startAnimations();}
         this.applyVisibility();this.updateSummary();this.applyInteraction();this.resize();this.syncMedia();this.selectionChanged();this.historyChanged();
       }catch(error){if(token===this.token){this.loading=false;this.callbacks.onError('This slide could not be loaded. '+error.message);}}
       finally{if(token===this.token)this.host.setAttribute('aria-busy','false');}
@@ -115,40 +137,76 @@ export class SlideEditor {
   serialize() {
     const scene=this.canvas.toObject(CUSTOM);
     scene.lpAnimations=structuredClone(this.animations||[]);
-    scene.objects.forEach(object=>{const base=this.animationBase?.get(object.lpId);if(base){object.visible=base.visible;object.opacity=base.opacity;}});
+    serializedDescendants(scene.objects).forEach(object=>{const base=this.animationBase?.get(object.lpId);if(base){object.visible=base.visible;object.opacity=base.opacity;}});
     // Reveal is session state. Save all answer objects so hidden answers are never lost.
     const normalize=objects=>objects.forEach(object=>{if(object.lpRole==='answer')object.visible=true;if(object.objects)normalize(object.objects);});
     normalize(scene.objects);return scene;
   }
   snapshot() {if(this.ready&&!this.loading&&this.index>=0)this.slides[this.index]=this.serialize();}
+  renameSlideTitle(index,text) {
+    if(this.readonly||!this.slides[index])return false;
+    if(this.ready&&!this.loading&&index===this.index){
+      const title=descendants(this.canvas.getObjects()).find(object=>object.lpRole==='title');
+      if(!title||title.text===text)return false;
+      title.set({text});title.setCoords();this.canvas.requestRenderAll();this.commit();
+    }else{
+      const title=serializedDescendants(this.slides[index].objects).find(object=>object.lpRole==='title');
+      if(!title||title.text===text)return false;
+      title.text=text;
+      const history=this.histories[index];history.undo.push(JSON.stringify(this.slides[index]));
+      if(history.undo.length>80)history.undo.shift();history.redo=[];
+      this.callbacks.onChange();
+    }
+    return true;
+  }
   commit() {
     if(!this.ready||this.loading)return;
     this.snapshot();const history=this.histories[this.index];const value=JSON.stringify(this.slides[this.index]);
     if(value!==history.undo.at(-1)){history.undo.push(value);if(history.undo.length>80)history.undo.shift();history.redo=[];}
-    const title=this.canvas.getObjects().find(object=>object.lpRole==='title');
+    const title=descendants(this.canvas.getObjects()).find(object=>object.lpRole==='title');
     if(title)this.callbacks.onTitleChange?.(this.index,title.text);
     this.syncMedia();this.updateSummary();this.historyChanged();this.callbacks.onChange();
   }
-  historyChanged() {const history=this.histories[this.index];this.callbacks.onHistory?.({undo:(history?.undo.length||0)>1,redo:!!history?.redo.length});}
+  annotationSnapshot(){return JSON.stringify(this.serialize().objects.flatMap((object,index)=>object.lpAnnotation?[{object,index}]:[]));}
+  ensureAnnotationHistory(){this.annotationHistories||=[];return this.annotationHistories[this.index] ||= {undo:[this.annotationSnapshot()],redo:[]};}
+  recordAnnotations(){const history=this.ensureAnnotationHistory(),value=this.annotationSnapshot();if(value!==history.undo.at(-1)){history.undo.push(value);history.redo=[];}}
+  async restoreAnnotations(direction){
+    if(!this.ready||this.annotationRestoring)return;
+    const history=this.ensureAnnotationHistory();if(direction==='undo'?history.undo.length<2:!history.redo.length)return;
+    const value=direction==='undo'?history.undo.at(-2):history.redo.at(-1);
+    const token=this.token,index=this.index;this.annotationRestoring=true;
+    try{
+      const entries=JSON.parse(value),objects=await util.enlivenObjects(entries.map(entry=>entry.object));
+      if(token!==this.token||index!==this.index||!this.readonly)return;
+      this.canvas.remove(...this.canvas.getObjects().filter(object=>object.lpAnnotation));
+      objects.forEach((object,i)=>this.canvas.insertAt(entries[i].index,object));
+      if(direction==='undo')history.redo.push(history.undo.pop());else history.undo.push(history.redo.pop());
+      this.applyInteraction();this.commit();
+    }finally{this.annotationRestoring=false;}
+  }
+  historyChanged() {const history=this.readonly?this.ensureAnnotationHistory():this.histories[this.index];this.callbacks.onHistory?.({undo:(history?.undo.length||0)>1,redo:!!history?.redo.length,editing:!this.readonly});}
   async undo() {
+    if(this.readonly)return this.restoreAnnotations('undo');
     if(!this.ready)return;const history=this.histories[this.index];if(history.undo.length<2)return;
     history.redo.push(history.undo.pop());this.slides[this.index]=JSON.parse(history.undo.at(-1));await this.reloadHistory();
   }
   async redo() {
+    if(this.readonly)return this.restoreAnnotations('redo');
     if(!this.ready)return;const history=this.histories[this.index];if(!history.redo.length)return;
     const value=history.redo.pop();history.undo.push(value);this.slides[this.index]=JSON.parse(value);await this.reloadHistory();
   }
   async reloadHistory() {
     // Do not snapshot the canvas over the restored history entry.
     const index=this.index;this.ready=false;await this.show(index,this.revealCount);this.callbacks.onChange();
-    const title=this.canvas.getObjects().find(object=>object.lpRole==='title');if(title)this.callbacks.onTitleChange?.(index,title.text);
+    const title=descendants(this.canvas.getObjects()).find(object=>object.lpRole==='title');if(title)this.callbacks.onTitleChange?.(index,title.text);
   }
   setMode({readonly=this.readonly,preview=this.preview,drawing=false}={}) {
     const changed=readonly!==this.readonly;
+    if(changed&&readonly)this.annotationHistories=[];
     this.readonly=readonly;this.preview=preview;this.drawing=drawing;
-    if(changed&&this.ready){if(readonly)this.startAnimations();else this.stopAnimations();}
+    if(changed&&this.ready){if(readonly){this.ensureAnnotationHistory();this.startAnimations();}else this.stopAnimations();}
     if(this.readonly)this.canvas.discardActiveObject();
-    this.applyInteraction();this.syncMedia();this.canvas.requestRenderAll();
+    this.applyInteraction();this.syncMedia();this.canvas.requestRenderAll();if(this.ready)this.historyChanged();
   }
   applyInteraction() {
     this.canvas.selection=!this.readonly&&this.ready;this.canvas.skipTargetFind=this.readonly||!this.ready;
@@ -156,9 +214,9 @@ export class SlideEditor {
     this.canvas.getObjects().forEach(object=>object.set({selectable:!this.readonly,evented:!this.readonly}));
     this.canvas.requestRenderAll();
   }
-  setReveal(count) {this.revealCount=count;this.applyVisibility();}
+  setReveal(count) {this.revealCount=count;this.applyVisibility();this.syncMedia();}
   applyVisibility() {
-    this.canvas.getObjects().forEach(object=>{
+    descendants(this.canvas.getObjects()).forEach(object=>{
       const base=this.animationBase?.get(object.lpId),value=this.animationValues?.get(object.lpId)??1;
       if(base){object.set({visible:base.visible&&value>0,opacity:base.opacity*value});}
       if(object.lpRole==='answer')object.set('visible',object.lpAnswerIndex<this.revealCount&&(!base||value>0));
@@ -167,15 +225,16 @@ export class SlideEditor {
   }
   startAnimations() {
     this.stopAnimations();
-    this.animationBase=new Map(this.canvas.getObjects().map(object=>[object.lpId,{visible:object.lpRole==='answer'?true:object.visible,opacity:object.opacity}]));
-    this.player=new AnimationPlayer(this.animations||[],values=>{this.animationValues=values;this.applyVisibility();this.syncMedia();});
+    this.animationBase=new Map(descendants(this.canvas.getObjects()).map(object=>[object.lpId,{visible:object.lpRole==='answer'?true:object.visible,opacity:object.opacity}]));
+    this.player=new AnimationPlayer(this.animations||[],values=>{this.animationValues=values;this.applyVisibility();this.syncMedia();},{onStateChange:state=>this.callbacks.onPlayback?.(state)});
   }
   stopAnimations() {
     this.player?.stop();this.player=null;
-    this.canvas.getObjects().forEach(object=>{const base=this.animationBase?.get(object.lpId);if(base)object.set(base);});
+    descendants(this.canvas.getObjects()).forEach(object=>{const base=this.animationBase?.get(object.lpId);if(base)object.set(base);});
     this.animationBase=null;this.animationValues=null;
     this.applyVisibility();this.syncMedia();
   }
+  getPlaybackState(){return this.player?.state;}
   nextAnimation() {return !!this.player?.next();}
   addAnimation(effect,trigger,delay=0,grouping='together') {
     const objects=this.canvas.getActiveObjects();if(this.readonly||!objects.length)return false;
@@ -195,7 +254,7 @@ export class SlideEditor {
     this.animations.splice(to,0,this.animations.splice(from,1)[0]);this.commit();return true;
   }
   animationTargets(effect) {
-    const objects=new Map(this.canvas.getObjects().map(object=>[object.lpId,object]));
+    const objects=new Map(descendants(this.canvas.getObjects()).map(object=>[object.lpId,object]));
     return effect.targets.map(id=>{
       const object=objects.get(id);
       if(!object)return {label:'Removed object'};
@@ -250,9 +309,21 @@ export class SlideEditor {
     if(token!==this.token||!this.ready)return;
     const scale=Math.min(1,600/image.width,420/image.height);image.set({...DEFAULT_IMAGE_STYLE,left:point.x,top:point.y,scaleX:scale,scaleY:scale});this.add(image);
   }
+  async addImageFromURL(value,point={x:160,y:150}) {
+    if(!this.ready||this.readonly)return;
+    const url=imageURL(value);
+    if(!url)throw new Error('Paste a direct HTTPS image URL without login credentials.');
+    const token=this.token;
+    let image;
+    try {image=await StyledImage.fromURL(url,{crossOrigin:'anonymous',signal:AbortSignal.timeout(15000)});}
+    catch {throw new Error('Could not load this image. Use a direct image link from a host that allows cross-origin access, or paste the image itself.');}
+    if(token!==this.token||!this.ready||this.readonly)return;
+    const scale=Math.min(1,600/image.width,420/image.height);
+    image.set({...DEFAULT_IMAGE_STYLE,left:point.x,top:point.y,scaleX:scale,scaleY:scale});this.add(image);
+  }
   addVideo(url) {
     const id=youtubeId(url);if(!id)throw new Error('Paste a valid YouTube watch, shorts, or share link.');
-    this.add(new Rect({left:160,top:160,width:640,height:360,fill:'#223d34',rx:8,ry:8,lpVideoId:id,lpLabel:'YouTube video'}));
+    this.add(new VideoRect({left:160,top:160,width:640,height:360,fill:'#223d34',rx:8,ry:8,lpVideoId:id,lpLabel:'YouTube video'}));
   }
   selected() {return this.canvas.getActiveObject();}
   selectAll() {
@@ -262,8 +333,63 @@ export class SlideEditor {
     if(objects.length)this.canvas.setActiveObject(objects.length===1?objects[0]:new ActiveSelection(objects,{canvas:this.canvas}));
     this.canvas.requestRenderAll();
   }
-  selectionChanged() {const object=this.selected();this.callbacks.onSelection?.(object ? {image:object instanceof FabricImage,stroke:object.stroke||'#cbd3df',strokeWidth:object.strokeWidth||0,imageRadius:object.lpImageRadius||0,type:object.lpVideoId?'video':object.lpSticker?'sticker':object.type,text:'text'in object,fontSize:object.fontSize||36,fontFamily:object.fontFamily||'Arial',fill:typeof object.fill==='string'?object.fill:'#244d40',fontWeight:object.fontWeight||'normal',fontStyle:object.fontStyle||'normal',textAlign:object.textAlign||'left'} : null);}
-  updateSelected(properties) {const object=this.selected();if(!object||this.readonly||!this.ready)return;object.set(properties);object.setCoords();this.canvas.requestRenderAll();this.commit();this.selectionChanged();}
+  selectionChanged() {
+    const object=this.selected();
+    this.callbacks.onSelection?.(object ? {...selectionPaint(object),count:this.canvas.getActiveObjects().length,canGroup:this.canvas.getActiveObjects().length>1,canUngroup:object instanceof Group&&!(object instanceof ActiveSelection)&&!object.lpSticker,image:object instanceof FabricImage,stroke:object.stroke||'#cbd3df',strokeWidth:object.strokeWidth||0,imageRadius:object.lpImageRadius||0,type:object.lpVideoId?'video':object.lpSticker?'sticker':object.type,text:'text'in object,fontSize:object.fontSize||36,fontFamily:object.fontFamily||'Arial',fontWeight:object.fontWeight||'normal',fontStyle:object.fontStyle||'normal',textAlign:object.textAlign||'left'} : null);
+  }
+  groupSelection() {
+    if(this.readonly||!this.ready||this.selected()?.isEditing)return false;
+    const selected=new Set(this.canvas.getActiveObjects());
+    if(selected.size<2)return false;
+    const ordered=this.canvas.getObjects(),objects=ordered.filter(object=>selected.has(object));
+    const index=ordered.indexOf(objects.at(-1))-objects.length+1;
+    this.canvas.discardActiveObject();
+    this.canvas.remove(...objects);
+    const group=new Group(objects,{lpId:uid(),objectCaching:false});
+    this.canvas.insertAt(index,group);this.canvas.setActiveObject(group);
+    this.canvas.requestRenderAll();this.commit();this.selectionChanged();return true;
+  }
+  ungroupSelection() {
+    const group=this.selected();
+    if(this.readonly||!this.ready||!(group instanceof Group)||group instanceof ActiveSelection||group.lpSticker)return false;
+    const index=this.canvas.getObjects().indexOf(group);
+    this.canvas.discardActiveObject();
+    const objects=group.removeAll();this.canvas.remove(group);this.canvas.insertAt(index,...objects);
+    this.animations=(this.animations||[]).map(effect=>({...effect,targets:effect.targets.flatMap(id=>id===group.lpId?objects.map(object=>object.lpId):[id])}));
+    this.canvas.setActiveObject(new ActiveSelection(objects,{canvas:this.canvas}));
+    this.canvas.requestRenderAll();this.commit();this.selectionChanged();return true;
+  }
+  toggleTextStyle(style) {
+    if(this.readonly||!this.ready)return false;
+    const settings={bold:['fontWeight','bold','normal'],italic:['fontStyle','italic','normal'],underline:['underline',true,false],strikethrough:['linethrough',true,false]};
+    if(!settings[style])return false;
+    const [property,on,off]=settings[style];
+    const texts=descendants(this.canvas.getActiveObjects()).filter(object=>typeof object.text==='string'&&object.setSelectionStyles);
+    if(!texts.length)return false;
+    const ranges=texts.map(object=>{
+      const partial=object.isEditing&&object.selectionEnd>object.selectionStart;
+      return {object,partial,start:partial?object.selectionStart:0,end:partial?object.selectionEnd:object._text.length};
+    });
+    const enabled=value=>style==='bold'?value==='bold'||Number(value)>=600:value===on;
+    const allEnabled=ranges.every(({object,start,end})=>{
+      const styles=object.getSelectionStyles(start,end,true);
+      return styles.length?styles.every(value=>enabled(value[property])):enabled(object[property]);
+    });
+    for(const {object,partial,start,end} of ranges){
+      const value=allEnabled?off:on;
+      if(!partial)object.set(property,value);
+      object.setSelectionStyles({[property]:value},start,end);
+      object.initDimensions();object.setCoords();
+    }
+    this.canvas.requestRenderAll();this.commit();this.selectionChanged();return true;
+  }
+  updateSelected(properties) {
+    const object=this.selected();if(!object||this.readonly||!this.ready)return;
+    const {fill,...other}=properties;
+    if(fill!==undefined)paintableObjects(object).forEach(target=>target.set(paintProperty(target),fill));
+    if(Object.keys(other).length)object.set(other);
+    object.setCoords();this.canvas.requestRenderAll();this.commit();this.selectionChanged();
+  }
   deleteSelection() {if(this.readonly||!this.ready||this.selected()?.isEditing)return;this.canvas.remove(...this.canvas.getActiveObjects());this.canvas.discardActiveObject();this.commit();}
   selectedObjectsData() {
     const ids=new Set(this.canvas.getActiveObjects().map(object=>object.lpId));
@@ -276,6 +402,7 @@ export class SlideEditor {
   async pasteObjects(data) {
     if(!this.ready||this.readonly)return;
     validateDocument({format:'lesson-presenter',version:1,lesson:{pages:[{title:'Clipboard',questions:[]}]},slides:[{objects:data}]});
+    data=structuredClone(data);corsImages(data);
     const token=this.token;const objects=await util.enlivenObjects(data);
     if(token!==this.token||this.readonly)return;
     this.canvas.discardActiveObject();
@@ -289,7 +416,7 @@ export class SlideEditor {
     await this.pasteObjects(this.selectedObjectsData());
   }
   moveLayer(front) {if(!this.selected()||this.readonly)return;const object=this.selected();if(front)this.canvas.bringObjectForward(object);else this.canvas.sendObjectBackwards(object);this.canvas.requestRenderAll();this.commit();}
-  clearAnnotations() {this.canvas.remove(...this.canvas.getObjects().filter(object=>object.lpAnnotation));this.commit();}
+  clearAnnotations() {if(this.readonly)this.ensureAnnotationHistory();this.canvas.remove(...this.canvas.getObjects().filter(object=>object.lpAnnotation));if(this.readonly)this.recordAnnotations();this.commit();}
   async paste(event) {
     if(!this.ready||this.readonly||this.selected()?.isEditing)return false;
     const items=[...event.clipboardData?.items||[]];const image=items.find(item=>item.type.startsWith('image/'))?.getAsFile();
@@ -298,29 +425,39 @@ export class SlideEditor {
     if(text){event.preventDefault();let copied;try{copied=JSON.parse(text);}catch{/* Plain text. */}if(copied?.format==='lesson-presenter-objects'){await this.pasteObjects(copied.objects);return true;}if(youtubeId(text))this.addVideo(text);else this.addText(text);return true;}
     return false;
   }
+  playVideo(id) {
+    if(!this.ready||!this.readonly||this.drawing||!visibleVideos(this.canvas.getObjects()).some(o=>o.lpId===id))return false;
+    this.playingVideoId=id;this.syncMedia();this.media.querySelector('button')?.focus();return true;
+  }
+  closeVideo(restoreFocus=true) {
+    this.playingVideoId=null;this.syncMedia();
+    if(restoreFocus&&!this.videoControls.hidden)this.videoControls.querySelector('button')?.focus();
+  }
   syncMedia() {
     if(!this.media||!this.scale)return;
-    const activeIds=new Set();
-    this.canvas.getObjects().filter(object=>object.lpVideoId&&object.visible!==false).forEach(object=>{
-      activeIds.add(object.lpId);
-      let node=[...this.media.children].find(child=>child.dataset.id===object.lpId);
-      if(!node){
-        node=document.createElement('div');node.className='video-object';node.dataset.id=object.lpId;
-        const poster=document.createElement('div');poster.className='video-poster';
-        const label=document.createElement('strong');label.textContent='▶ YouTube video';
-        const link=document.createElement('span');link.textContent=`youtube.com/watch?v=${object.lpVideoId}`;
-        const play=document.createElement('button');play.className='button secondary';play.textContent='Play video';
-        play.addEventListener('click',()=>{
-          if(!this.readonly)return;
-          const iframe=document.createElement('iframe');iframe.src=`https://www.youtube-nocookie.com/embed/${object.lpVideoId}`;iframe.title='Lesson YouTube video';iframe.allow='accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen';iframe.allowFullscreen=true;node.replaceChildren(iframe);
-        });
-        poster.append(label,link,play);node.append(poster);this.media.append(node);
-      }
-      Object.assign(node.style,{opacity:String(object.opacity),left:`${object.left*this.scale}px`,top:`${object.top*this.scale}px`,width:`${object.width*object.scaleX*this.scale}px`,height:`${object.height*object.scaleY*this.scale}px`,transform:`rotate(${object.angle||0}deg)`,transformOrigin:'0 0',pointerEvents:this.readonly?'auto':'none'});
-      node.querySelector('button')?.toggleAttribute('hidden',!this.readonly);
-      if(!this.readonly&&node.querySelector('iframe')){node.remove();activeIds.delete(object.lpId);}
-    });
-    [...this.media.children].forEach(node=>{if(!activeIds.has(node.dataset.id))node.remove();});
+    const videos=visibleVideos(this.canvas.getObjects());
+    this.videoControls.hidden=!this.readonly||this.drawing||!videos.length;
+    const key=videos.map(o=>o.lpId+':'+o.lpVideoId).join('|');
+    if(key!==this.videoOptionsKey){
+      const selected=this.videoSelect.value;this.videoSelect.replaceChildren();
+      videos.forEach((object,index)=>{const option=document.createElement('option');option.value=object.lpId;option.textContent=`Video ${index+1} · ${object.lpVideoId}`;this.videoSelect.append(option);});
+      if(videos.some(o=>o.lpId===selected))this.videoSelect.value=selected;
+      this.videoOptionsKey=key;
+    }
+    const object=this.readonly&&!this.drawing?videos.find(o=>o.lpId===this.playingVideoId):null;
+    if(!object){this.playingVideoId=null;this.media.replaceChildren();return;}
+    let node=this.media.firstElementChild;
+    if(node?.dataset.id!==object.lpId){
+      this.media.replaceChildren();node=document.createElement('div');node.className='video-object video-player';node.dataset.id=object.lpId;
+      const iframe=document.createElement('iframe');iframe.src=`https://www.youtube-nocookie.com/embed/${object.lpVideoId}`;iframe.title='Lesson YouTube video';iframe.allow='accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen';iframe.allowFullscreen=true;
+      const close=document.createElement('button');close.type='button';close.className='video-player-close';close.textContent='×';close.setAttribute('aria-label','Close video');close.addEventListener('click',()=>this.closeVideo());
+      node.addEventListener('keydown',event=>{if(event.key==='Escape'){event.stopPropagation();this.closeVideo();}});
+      node.append(iframe,close);this.media.append(node);
+    }
+    const matrix=videoTransform(object,this.canvas.viewportTransform);
+    Object.assign(node.style,{opacity:String(object.opacity),left:'0px',top:'0px',width:`${object.width}px`,height:`${object.height}px`,transform:`matrix(${matrix.join(',')})`,transformOrigin:'0 0',pointerEvents:'auto'});
+    const closeScale=Math.max(.05,Math.min(Math.hypot(matrix[0],matrix[1]),Math.hypot(matrix[2],matrix[3])));
+    Object.assign(node.querySelector('button').style,{width:`${32/closeScale}px`,height:`${32/closeScale}px`,fontSize:`${24/closeScale}px`});
   }
   documentSlides() {this.snapshot();return structuredClone(this.slides);}
   async imagesForPrint({allAnswers=true,annotations=true,counts=[],indices=null}) {
@@ -328,12 +465,9 @@ export class SlideEditor {
     for(const i of indices||slides.map((_,index)=>index)){
       const scene=slides[i];
       scene.objects=scene.objects.filter(object=>annotations||!object.lpAnnotation);
-      scene.objects.forEach(object=>{if(object.lpRole==='answer')object.visible=allAnswers||object.lpAnswerIndex<(counts[i]||0);});
+      serializedDescendants(scene.objects).forEach(object=>{if(object.lpRole==='answer')object.visible=allAnswers||object.lpAnswerIndex<(counts[i]||0);});
       const canvas=new StaticCanvas(document.createElement('canvas'),{width:W,height:H});
       await canvas.loadFromJSON(scene);
-      canvas.getObjects().filter(object=>object.lpVideoId).forEach(object=>{
-        canvas.add(textbox(`YouTube video\nhttps://youtu.be/${object.lpVideoId}`,object.left+20,object.top+25,Math.max(120,object.getScaledWidth()-40),24,{fill:'#fff'}));
-      });
       output.push(canvas.toDataURL({format:'png',multiplier:2}));await canvas.dispose();
     }
     return output;

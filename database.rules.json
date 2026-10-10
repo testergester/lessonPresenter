@@ -1,0 +1,200 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid && auth.token.email === 'mea.gdrive3@gmail.com' && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com'",
+        ".write": "auth != null && auth.uid === $uid && auth.token.email === 'mea.gdrive3@gmail.com' && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com'",
+        "lessons": {
+          "$id": {
+            ".validate": "newData.hasChildren(['json'])",
+            "json": {
+              ".validate": "newData.isString() && newData.val().length <= 2097152"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "index": {
+          "$id": {
+            ".validate": "newData.hasChildren(['title', 'updatedAt'])",
+            "title": {
+              ".validate": "newData.isString() && newData.val().length <= 200"
+            },
+            "updatedAt": {
+              ".validate": "newData.isNumber() && newData.val() <= now"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "syncTests": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid && auth.token.email === 'mea.gdrive3@gmail.com' && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && !root.child('cloudLessons').child($uid).child('migrationComplete').exists()",
+        ".write": "auth != null && auth.uid === $uid && auth.token.email === 'mea.gdrive3@gmail.com' && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com' && !root.child('cloudLessons').child($uid).child('migrationStarted').exists() && !root.child('cloudLessons').child($uid).child('migrationComplete').exists()",
+        "incrementalLessons": {
+          "$id": {
+            ".validate": "!root.child('cloudLessons').child($uid).child('lessons').child($id).exists() && (newData.hasChild('head') && ((!data.exists() && newData.child('head/revision').val() === 1 && newData.child('head/deleted').val() === false) || (data.exists() && data.child('head/deleted').val() === false && newData.child('head/revision').val() === data.child('head/revision').val() + 1)) && ((newData.child('head/deleted').val() === false && newData.hasChild('entries')) || (newData.child('head/deleted').val() === true && !newData.hasChild('entries') && !newData.hasChild('assets'))))",
+            "head": {
+              ".validate": "newData.hasChildren(['version','revision','writeId','title','updatedAt','deleted'])",
+              "version": {
+                ".validate": "newData.val() === 1"
+              },
+              "revision": {
+                ".validate": "newData.isNumber() && newData.val() > 0 && newData.val() % 1 === 0"
+              },
+              "writeId": {
+                ".validate": "newData.isString() && newData.val().length <= 128"
+              },
+              "title": {
+                ".validate": "newData.isString() && newData.val().length <= 200"
+              },
+              "updatedAt": {
+                ".validate": "newData.isNumber() && newData.val() <= now"
+              },
+              "deleted": {
+                ".validate": "newData.isBoolean()"
+              },
+              "sourceId": {
+                ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]{1,128}$/)"
+              },
+              "$other": {
+                ".validate": false
+              }
+            },
+            "entries": {
+              "$field": {
+                ".validate": "newData.isString() && newData.val().length <= 2097152"
+              }
+            },
+            "assets": {
+              "$hash": {
+                ".validate": "$hash.matches(/^[a-f0-9]{64}$/) && newData.isString() && newData.val().length <= 2097152 && newData.val().matches(/^data:image\\/(png|jpeg|webp|gif|svg\\+xml);base64,[A-Za-z0-9+\\/=\\r\\n]+$/) && (!data.exists() || newData.val() === data.val())"
+              }
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "incrementalIndex": {
+          "$id": {
+            ".validate": "!root.child('cloudLessons').child($uid).child('lessons').child($id).exists() && (newData.hasChildren(['title','updatedAt']) && newData.parent().parent().child('incrementalLessons').child($id).child('head/deleted').val() === false)",
+            "title": {
+              ".validate": "newData.isString() && newData.val().length <= 200"
+            },
+            "updatedAt": {
+              ".validate": "newData.isNumber() && newData.val() <= now"
+            },
+            "sourceId": {
+              ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]{1,128}$/)"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "cloudLessons": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid && auth.token.email === 'mea.gdrive3@gmail.com' && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com'",
+        ".write": "auth != null && auth.uid === $uid && auth.token.email === 'mea.gdrive3@gmail.com' && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com'",
+        "$other": {
+          ".validate": false
+        },
+        "lessons": {
+          "$id": {
+            ".validate": "newData.hasChild('head') && ((!data.exists() && ((!(root.child('syncTests').child($uid).child('incrementalLessons').child($id)).exists() && newData.child('head/revision').val() === 1 && newData.child('head/deleted').val() === false) || ((root.child('syncTests').child($uid).child('incrementalLessons').child($id)).exists() && newData.child('head/revision').val() === (root.child('syncTests').child($uid).child('incrementalLessons').child($id)).child('head/revision').val() && newData.child('head/writeId').val() === (root.child('syncTests').child($uid).child('incrementalLessons').child($id)).child('head/writeId').val() && newData.child('head/deleted').val() === (root.child('syncTests').child($uid).child('incrementalLessons').child($id)).child('head/deleted').val()))) || (data.exists() && data.child('head/deleted').val() === false && newData.child('head/revision').val() === data.child('head/revision').val() + 1)) && ((newData.child('head/deleted').val() === false && newData.hasChild('entries')) || (newData.child('head/deleted').val() === true && !newData.hasChild('entries') && !newData.hasChild('assets')))",
+            "head": {
+              ".validate": "newData.hasChildren(['version','revision','writeId','title','updatedAt','deleted'])",
+              "version": {
+                ".validate": "newData.val() === 1"
+              },
+              "revision": {
+                ".validate": "newData.isNumber() && newData.val() > 0 && newData.val() % 1 === 0"
+              },
+              "writeId": {
+                ".validate": "newData.isString() && newData.val().length <= 128"
+              },
+              "title": {
+                ".validate": "newData.isString() && newData.val().length <= 200"
+              },
+              "updatedAt": {
+                ".validate": "newData.isNumber() && newData.val() <= now"
+              },
+              "deleted": {
+                ".validate": "newData.isBoolean()"
+              },
+              "sourceId": {
+                ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]{1,128}$/)"
+              },
+              "$other": {
+                ".validate": false
+              },
+              "cacheVersion": {
+                ".validate": "newData.val() === 1"
+              },
+              "cacheEpoch": {
+                ".validate": "newData.isString() && newData.val().length <= 128"
+              }
+            },
+            "entries": {
+              "$field": {
+                ".validate": "newData.isString() && newData.val().length <= 2097152"
+              }
+            },
+            "assets": {
+              "$hash": {
+                ".validate": "$hash.matches(/^[a-f0-9]{64}$/) && newData.isString() && newData.val().length <= 2097152 && newData.val().matches(/^data:image\\/(png|jpeg|webp|gif|svg\\+xml);base64,[A-Za-z0-9+\\/=\\r\\n]+$/) && (!data.exists() || newData.val() === data.val())"
+              }
+            },
+            "$other": {
+              ".validate": false
+            },
+            "fieldVersions": {
+              ".indexOn": ".value",
+              "$field": {
+                ".validate": "$field.matches(/^(e:[A-Za-z0-9_]+|a:[a-f0-9]{64})$/) && newData.isNumber() && newData.val() % 1 === 0 && newData.val() > 0 && newData.val() === newData.parent().parent().child('head/revision').val()"
+              }
+            }
+          }
+        },
+        "index": {
+          "$id": {
+            ".validate": "newData.hasChildren(['title','updatedAt']) && newData.parent().parent().child('lessons').child($id).child('head/deleted').val() === false",
+            "title": {
+              ".validate": "newData.isString() && newData.val().length <= 200"
+            },
+            "updatedAt": {
+              ".validate": "newData.isNumber() && newData.val() <= now"
+            },
+            "sourceId": {
+              ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]{1,128}$/)"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "migrationComplete": {
+          ".validate": "newData.val() === true"
+        },
+        "migrationStarted": {
+          ".validate": "newData.val() === true"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "format": "lesson-presenter",
+  "version": 1,
+  "lesson": {
+    "title": "Version 1 example",
+    "pages": [
+      {
+        "stageId": "slide-1",
+        "title": "Editable lesson",
+        "aim": "Discuss the image.",
+        "teacherNotes": [
+          "Ask students what they notice."
+        ],
+        "questions": []
+      }
+    ]
+  },
+  "slides": [
+    {
+      "version": "7.4.0",
+      "background": "#ffffff",
+      "objects": [
+        {
+          "type": "Textbox",
+          "lpId": "title-1",
+          "lpRole": "title",
+          "text": "Editable lesson",
+          "left": 80,
+          "top": 60,
+          "width": 1000,
+          "fontSize": 48,
+          "fill": "#263447"
+        },
+        {
+          "type": "Image",
+          "lpId": "image-1",
+          "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMzIwIiBoZWlnaHQ9IjE4MCIgZmlsbD0iI2VhZjBmZiIvPjxjaXJjbGUgY3g9IjE2MCIgY3k9IjkwIiByPSI0OCIgZmlsbD0iIzM4NjZlNSIvPjwvc3ZnPg==",
+          "left": 80,
+          "top": 180,
+          "width": 320,
+          "height": 180,
+          "scaleX": 2,
+          "scaleY": 2,
+          "lpImageRadius": 16,
+          "stroke": "#cbd3df",
+          "strokeWidth": 2,
+          "strokeUniform": true
+        }
+      ],
+      "lpAnimations": [
+        {
+          "id": "appear-image",
+          "effect": "appear",
+          "trigger": "click",
+          "targets": [
+            "image-1"
+          ],
+          "delay": 0
+        }
+      ]
+    }
+  ],
+  "roster": [],
+  "revealedAnswerCountByPage": [
+    0
+  ]
+}

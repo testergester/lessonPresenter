@@ -1,4 +1,8 @@
 import {StaticCanvas} from 'fabric';
+import {StudioPanels} from './src/studio-panels.js';
+import './src/video.js';
+const smallScreen=matchMedia('(max-width:680px)');
+const panels=new StudioPanels(smallScreen.matches);
 
 const $=id=>document.getElementById(id);
 const node=(tag,className,html='')=>{const el=document.createElement(tag);el.className=className;el.innerHTML=html;return el;};
@@ -41,7 +45,7 @@ const titles={'section-shapes':'Shapes','section-stickers':'Stickers','section-v
 let activeTool=null;
 function showPanel(panel,target=null,title=null){
   activeTool=target;
-  if(target){document.body.classList.remove('studio-hide-properties');$('studioPropertiesToggle')?.setAttribute('aria-pressed','true');}
+  if(target)openStudioPanel('properties');
   design.hidden=panel!=='design';teaching.hidden=panel!=='teach';toolContent.hidden=!target;toolHeading.hidden=!target;
   tabs.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.panel===panel)));
   toolContent.querySelectorAll('.feature-section').forEach(section=>section.classList.toggle('active',section.id===target));
@@ -91,7 +95,7 @@ document.addEventListener('studio:open-tool',event=>{
   if(sidebarAnimationRequest){closePopover();showPanel('animations',event.detail.target,event.detail.title);}
   else openPopover(event.detail.target,event.detail.title);
 });
-document.addEventListener('studio:display-mode',event=>{const mode=event.detail.mode;document.body.classList.toggle('studio-hide-slides',mode==='board');document.body.classList.remove('studio-hide-properties');$('studioSlidesToggle').setAttribute('aria-pressed',String(mode!=='board'));$('studioPropertiesToggle').setAttribute('aria-pressed','true');});
+document.addEventListener('studio:display-mode',event=>{panels.setPanel('slides',event.detail.mode!=='board');panels.setPanel('properties',true);renderPanels();});
 document.addEventListener('studio:close-tool',()=>{
   const target=popoverTarget;closePopover();
   if(target==='section-participation'&&(!$('participationHub').hidden||!$('responseBoards').hidden))showPanel('teach');
@@ -111,20 +115,98 @@ quick.addEventListener('click',event=>{const target=event.target.dataset.open;co
 const hint=design.querySelector('.studio-selection-hint');
 new MutationObserver(()=>{hint.hidden=!$('selectionInspector').hidden;}).observe($('selectionInspector'),{attributes:true,attributeFilter:['hidden']});
 const original=node('a','studio-original','Original workspace');original.href='/index.html';document.querySelector('.header-actions').prepend(original);
-const title=node('span','studio-document-title');
-const documentInfo=node('div','studio-document-info');documentInfo.append(title,$('status'));document.querySelector('.workspace-label').replaceWith(documentInfo);
+const title=node('input','studio-document-title');title.id='studioLessonTitle';title.type='text';title.maxLength=200;title.setAttribute('aria-label','Lesson title');title.title='Rename lesson';title.autocomplete='off';
+const cloudIcon=node('button','studio-cloud-status','<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18a4.5 4.5 0 0 1-.6-9 6.5 6.5 0 0 1 12.2-1 5 5 0 0 1 .4 10"/><path class="cloud-mark cloud-saved" d="m8 14 3 3 5-5"/><path class="cloud-mark cloud-saving" d="M12 18v-7m-3 3 3-3 3 3"/><path class="cloud-mark cloud-connecting" d="M9 15h.01M12 15h.01M15 15h.01"/><path class="cloud-mark cloud-disconnected" d="m9 12 6 6m0-6-6 6"/></svg>');cloudIcon.type='button';cloudIcon.dataset.state='connecting';cloudIcon.setAttribute('aria-label','Cloud: connecting');cloudIcon.addEventListener('click',()=>$('cloudBtn').click());
+const titleRow=node('div','studio-document-title-row');titleRow.append(title,cloudIcon);
+const documentInfo=node('div','studio-document-info');documentInfo.append(titleRow,$('status'));document.querySelector('.workspace-label').replaceWith(documentInfo);
+let titleLesson=null;
+const titleMeasure=document.createElement('canvas').getContext('2d');
+function sizeTitle(){
+  titleMeasure.font=getComputedStyle(title).font;
+  title.style.setProperty('--title-width',`${Math.ceil(titleMeasure.measureText(title.value||'Untitled lesson').width)+14}px`);
+  title.style.setProperty('--title-available',`${Math.max(80,window.innerWidth-title.getBoundingClientRect().left-16)}px`);
+}
+window.addEventListener('resize',sizeTitle);
+title.addEventListener('input',sizeTitle);
+function syncTitle(){
+  if(!engine)return;
+  const state=engine.getStudioState();
+  if(document.activeElement!==title||titleLesson!==state.lesson)title.value=state.lesson.title;
+  titleLesson=state.lesson;title.readOnly=panels.mode!=='teacher';sizeTitle();
+}
+title.addEventListener('focus',()=>{sizeTitle();title.select();});
+title.addEventListener('blur',()=>{if(engine)title.value=engine.renameLesson(title.value);sizeTitle();});
+title.addEventListener('keydown',event=>{
+  event.stopPropagation();
+  if(event.key==='Enter'){event.preventDefault();title.blur();}
+  if(event.key==='Escape'){event.preventDefault();title.value=engine.getStudioState().lesson.title;title.blur();}
+});
+function syncCloudIcon(){
+  const indicator=$('cloudSaveIndicator'),message=indicator.textContent;
+  cloudIcon.dataset.state=indicator.dataset.state||'connecting';cloudIcon.dataset.tooltip=message;cloudIcon.setAttribute('aria-label',message+' · Open cloud lessons');
+  if(cloudIcon.hasAttribute('aria-describedby'))showTooltip({target:cloudIcon});
+}
+new MutationObserver(syncCloudIcon).observe($('cloudSaveIndicator'),{childList:true,characterData:true,subtree:true,attributes:true,attributeFilter:['data-state']});syncCloudIcon();
 new MutationObserver(()=>{$('status').title=$('status').textContent;}).observe($('status'),{childList:true,characterData:true,subtree:true});
-const resizePanels=node('div','studio-panel-buttons','<button type="button" id="studioSlidesToggle" aria-label="Toggle slide list" aria-pressed="true">☰</button><button type="button" id="studioPropertiesToggle" aria-label="Toggle properties panel" aria-pressed="true">▥</button>');toolStrip.prepend(resizePanels);
-for(const [id,className] of [['studioSlidesToggle','studio-hide-slides'],['studioPropertiesToggle','studio-hide-properties']])$(id).addEventListener('click',()=>{const hidden=document.body.classList.toggle(className);$(id).setAttribute('aria-pressed',String(!hidden));});
-if(matchMedia('(max-width:680px)').matches){document.body.classList.add('studio-hide-properties');$('studioPropertiesToggle').setAttribute('aria-pressed','false');}
-showPanel('design');
+const panelIcon=side=>`<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M${side==='left'?9:15} 4v16"/><path class="studio-panel-icon-fill" d="${side==='left'?'M6 5h3v14H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z':'M15 5h3a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-3Z'}"/></svg>`;
+const leftPanelControl=node('div','studio-panel-buttons studio-panel-left',`<button type="button" id="studioSlidesToggle" aria-label="Toggle slide list" data-tooltip="Hide slide list" aria-pressed="true">${panelIcon('left')}</button>`);
+const rightPanelControl=node('div','studio-panel-buttons studio-panel-right',`<button type="button" id="studioPropertiesToggle" aria-label="Toggle properties panel" data-tooltip="Hide properties panel" aria-pressed="true">${panelIcon('right')}</button>`);
+// Keep panel controls outside the scrolling tool strip so reopening is always reachable.
+ toolbar.prepend(leftPanelControl);toolbar.append(rightPanelControl);
+const panelRoots={slides:$('lessonNavigation'),properties:$('teachingNavigation')};
+const panelButtons={slides:$('studioSlidesToggle'),properties:$('studioPropertiesToggle')};
+const backdrop=node('button','studio-drawer-backdrop');backdrop.type='button';backdrop.hidden=true;backdrop.setAttribute('aria-label','Close side panel');shell.append(backdrop);
+let drawerOpener=null;
+for(const panel of ['slides','properties']){
+  const root=panelRoots[panel],button=panelButtons[panel];
+  button.setAttribute('aria-controls',root.id);
+  const close=node('button','studio-drawer-close','×');close.type='button';close.setAttribute('aria-label',`Close ${panel==='slides'?'slide list':'properties'}`);
+  root.prepend(close);close.addEventListener('click',()=>closeDrawer());
+  button.addEventListener('click',()=>{closePopover();const wasOpen=panels.visible(panel);panels.toggle(panel);drawerOpener=button;renderPanels();if(panels.mobile&&!wasOpen)focusDrawer(panel);});
+}
+function renderPanels(){
+  const drawer=panels.mobile?panels.drawer:null;
+  document.body.classList.toggle('studio-mobile',panels.mobile);
+  for(const panel of ['slides','properties']){
+    const visible=panels.visible(panel),root=panelRoots[panel],button=panelButtons[panel];
+    document.body.classList.toggle('studio-hide-'+panel,!visible);
+    root.hidden=!visible;root.inert=!visible;
+    button.setAttribute('aria-pressed',String(visible));button.setAttribute('aria-expanded',String(visible));
+    button.dataset.tooltip=`${visible?'Hide':'Show'} ${panel==='slides'?'slide list':'properties panel'}`;
+    button.disabled=panels.mode==='present'||panels.mode==='preview'&&panel==='properties';
+    if(drawer===panel){root.setAttribute('role','dialog');root.setAttribute('aria-modal','true');root.setAttribute('aria-label',panel==='slides'?'Slide list':'Properties');}
+    else{root.removeAttribute('role');root.removeAttribute('aria-modal');root.removeAttribute('aria-label');}
+  }
+  backdrop.hidden=!drawer;workspace.inert=!!drawer;
+  requestAnimationFrame(()=>engine?.getStudioState().editor?.resize());
+}
+function focusDrawer(panel){requestAnimationFrame(()=>panelRoots[panel].querySelector('button:not(:disabled),input,select,textarea')?.focus());}
+function closeDrawer(restoreFocus=true){if(!panels.drawer)return;panels.closeDrawer();renderPanels();if(restoreFocus)drawerOpener?.focus();}
+function openStudioPanel(panel){panels.setPanel(panel,true);drawerOpener=panelButtons[panel];renderPanels();if(panels.mobile)focusDrawer(panel);}
+backdrop.addEventListener('click',()=>closeDrawer());
+document.addEventListener('click',event=>{
+  if(panels.mobile&&panels.drawer&&!panelRoots[panels.drawer].contains(event.target)&&!event.target.closest('.studio-panel-buttons')&&!popover.contains(event.target))closeDrawer();
+},true);
+$('stageList').addEventListener('click',event=>{if(event.target.closest('.stage-item'))closeDrawer();});
+document.addEventListener('keydown',event=>{
+  if(!panels.mobile||!panels.drawer||!popover.hidden||$('toolsDialog').open)return;
+  if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();closeDrawer();}
+  else if(event.key==='Tab'){
+    const controls=[...panelRoots[panels.drawer].querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href]')].filter(e=>e.getClientRects().length);
+    const first=controls[0],last=controls.at(-1);
+    if(!controls.includes(document.activeElement)||event.shiftKey&&document.activeElement===first||!event.shiftKey&&document.activeElement===last){event.preventDefault();(event.shiftKey?last:first)?.focus();}
+  }
+},true);
+smallScreen.addEventListener('change',event=>{closePopover();closeDrawer();panels.setMobile(event.matches);renderPanels();});
+document.addEventListener('studio:mode',event=>{closePopover();closeDrawer();panels.setMode(event.detail.presenting?'present':event.detail.preview?'preview':'teacher');renderPanels();syncTitle();});
+renderPanels();showPanel('design');
 let engine,updateTimer,revision=0;
 const previews=new Map();
-document.addEventListener('studio:update',()=>{clearTimeout(updateTimer);updateTimer=setTimeout(updateThumbnails,180);});
+document.addEventListener('studio:update',()=>{syncTitle();clearTimeout(updateTimer);updateTimer=setTimeout(updateThumbnails,180);});
 async function updateThumbnails(){
   if(!engine)return;
   const {lesson,editor}=engine.getStudioState();if(!editor?.slides.length)return;
-  title.textContent=lesson.title;
+  syncTitle();
   const run=++revision;
   // One small offscreen canvas, cached by slide content; the saved lesson is untouched.
   const slides=editor.slides;
@@ -164,5 +246,38 @@ function changeZoom(value){
 $('studioZoomOut').addEventListener('click',()=>changeZoom((engine?.getStudioState().editor.zoom||1)-.25));
 $('studioZoomIn').addEventListener('click',()=>changeZoom((engine?.getStudioState().editor.zoom||1)+.25));
 $('studioZoomFit').addEventListener('click',()=>changeZoom(1));
-toolStrip.querySelectorAll('[data-tooltip]').forEach(button=>button.title=button.dataset.tooltip);
+// Keep every action reachable when the fixed toolbar cannot fit its contents.
+const more=node('button','icon-button','⋯');more.type='button';more.setAttribute('aria-label','More toolbar actions');more.setAttribute('data-tooltip','More toolbar actions');more.setAttribute('aria-haspopup','menu');more.setAttribute('aria-expanded','false');more.hidden=true;toolbar.insertBefore(more,zoomControls);
+const overflow=node('div','studio-overflow-menu');overflow.id='studioOverflowMenu';overflow.setAttribute('role','menu');overflow.hidden=true;document.body.append(overflow);more.setAttribute('aria-controls',overflow.id);
+function closeOverflow(focus=false){overflow.hidden=true;more.setAttribute('aria-expanded','false');if(focus)more.focus();}
+function clippedTools(){const rect=toolStrip.getBoundingClientRect();return [...toolStrip.querySelectorAll('button')].filter(button=>{const r=button.getBoundingClientRect();return r.width&&(r.left<rect.left-1||r.right>rect.right+1);});}
+function updateOverflow(){more.hidden=toolStrip.scrollWidth<=toolStrip.clientWidth+1;if(more.hidden)closeOverflow();}
+new ResizeObserver(updateOverflow).observe(toolbar);
+more.addEventListener('click',()=>{
+ if(!overflow.hidden){closeOverflow();return;}
+ overflow.replaceChildren();
+ for(const original of clippedTools()){
+  const item=node('button','');item.type='button';item.textContent=original.getAttribute('aria-label')||original.dataset.tooltip||original.textContent.trim();item.disabled=original.disabled;item.setAttribute('role','menuitem');
+  item.addEventListener('click',()=>{closeOverflow();requestedAnchor=more;original.click();requestedAnchor=null;});overflow.append(item);
+ }
+ const rect=more.getBoundingClientRect();overflow.hidden=false;overflow.style.top=rect.bottom+6+'px';overflow.style.left=Math.max(8,Math.min(rect.right-190,innerWidth-198))+'px';more.setAttribute('aria-expanded','true');overflow.querySelector('button:not(:disabled)')?.focus();
+});
+document.addEventListener('pointerdown',event=>{if(!overflow.contains(event.target)&&!more.contains(event.target))closeOverflow();});
+document.addEventListener('keydown',event=>{
+ if(overflow.hidden)return;
+ if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();closeOverflow(true);}
+ if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)&&overflow.contains(event.target)){
+  event.preventDefault();event.stopImmediatePropagation();const items=[...overflow.querySelectorAll('button:not(:disabled)')],i=items.indexOf(document.activeElement);
+  items[event.key==='Home'?0:event.key==='End'?items.length-1:(i+(event.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();
+ }
+ if(event.key==='Tab')closeOverflow();
+},true);
+window.addEventListener('resize',()=>closeOverflow());
+const tooltip=node('div','studio-toolbar-tooltip');tooltip.id='studioToolbarTooltip';tooltip.setAttribute('role','tooltip');tooltip.hidden=true;document.body.append(tooltip);
+let tooltipAnchor=null;
+function hideTooltip(){tooltip.hidden=true;if(tooltipAnchor)tooltipAnchor.removeAttribute('aria-describedby');tooltipAnchor=null;}
+function showTooltip(event){const button=event.target.closest('[data-tooltip]');if(!button||(!toolbar.contains(button)&&button!==cloudIcon))return;hideTooltip();tooltipAnchor=button;tooltip.textContent=button.dataset.tooltip;tooltip.hidden=false;button.setAttribute('aria-describedby',tooltip.id);const rect=button.getBoundingClientRect();tooltip.style.top=rect.bottom+6+'px';tooltip.style.left=Math.max(8,Math.min(rect.left,innerWidth-tooltip.offsetWidth-8))+'px';}
+toolbar.addEventListener('pointerover',showTooltip);toolbar.addEventListener('focusin',showTooltip);toolbar.addEventListener('pointerout',event=>{if(!tooltipAnchor?.contains(event.relatedTarget))hideTooltip();});toolbar.addEventListener('focusout',hideTooltip);toolbar.addEventListener('click',hideTooltip);toolStrip.addEventListener('scroll',hideTooltip);window.addEventListener('resize',hideTooltip);
+cloudIcon.addEventListener('pointerover',showTooltip);cloudIcon.addEventListener('focusin',showTooltip);cloudIcon.addEventListener('pointerout',event=>{if(!cloudIcon.contains(event.relatedTarget))hideTooltip();});cloudIcon.addEventListener('focusout',hideTooltip);cloudIcon.addEventListener('click',hideTooltip);
+document.addEventListener('keydown',event=>{if(event.key==='Escape')hideTooltip();});
 engine=await import('./main.js');

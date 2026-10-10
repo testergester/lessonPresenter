@@ -66,20 +66,20 @@ A nonempty `stages` array is required. Known fields are type-checked. Stages sor
 
 ## Save and reopen
 
-**Save lesson** downloads a standard `.json` file containing the complete editable document and embedded images. Open it through **Import lesson** in this app. Double-clicking the file on your computer may open a text editor; it does not launch Lesson Presenter.
+**Save lesson** downloads a compact standard `.json` file containing the complete editable document and embedded images. Whitespace is omitted; all editable fields are retained. Open it through **Import lesson** in this app. Double-clicking the file on your computer may open a text editor; it does not launch Lesson Presenter.
 
 For smaller image-heavy files, **Export PDF → Download editable ZIP** downloads a standard `.zip` package containing:
 
-- `lesson.json`: lesson metadata, Fabric slide objects, answer progress, and roster
+- `lesson.json`: lesson metadata, Fabric slide objects, and roster
 - `assets/`: uploaded images, deduplicated when reused
 
 Reimporting the package restores editable text, geometry, colors, shapes, images, drawings, and video links. It is independent of the original uploaded image files. An editable document version is recorded so unsupported future versions can be rejected with a useful message.
 
-The working session autosaves to IndexedDB on this browser and origin, including uploaded images, stage position, and response boards. If storage fails, download a JSON or ZIP lesson file. Poll tallies and exit-ticket text are temporary. Timer progress is not saved. The app can convert the earlier HTML app's local snapshot when it exists on the same origin; its original snapshot is kept as a backup. Old image layouts can need adjustment, and the earlier annotation strokes are not migrated automatically.
+The app starts with one blank slide on every open or reload. It does not automatically restore the previous lesson, stage, answers, roster or cloud binding. Download JSON/ZIP or save to Cloud lessons before leaving, then explicitly import or open it when needed. Working snapshots still save locally during use, but startup does not load them. A fresh blank workspace is not automatically uploaded to the cloud.
 
 ## Present and export
 
-Edit, student preview, and presentation share one scene. Answer reveal changes visibility without deleting hidden answers from the saved document.
+Edit, student preview, and presentation share one scene. In student preview or presentation, click the slide or press Space to play the next effect, reveal the next answer once effects finish, or advance to the next visible slide once all answers are shown. Right Arrow and the on-screen right arrow use the same sequence. Left Arrow and the on-screen left arrow hide the most recently revealed answer; once all answers are hidden, they return to the previous visible slide. The final slide stops with a completion message. Answers start hidden on entering preview/presentation and reset to hidden on exit. Reveal progress is temporary: it does not trigger cloud/local autosave and is excluded from JSON/ZIP documents. Answer objects remain editable and are retained in saved documents.
 
 Print / save PDF renders every visible slide with options for answers and annotations. PDF uses a 2560 × 1440 static image of each slide; video objects become a labeled placeholder with the YouTube link. Presentation state is not changed by export. Use the app's Export PDF action rather than the browser's direct Print shortcut to prepare the slide images.
 
@@ -123,3 +123,33 @@ In Studio, Board view expands the canvas by hiding the slide list, Compact view 
 Studio's top-right controls zoom out, zoom in, or fit the slide to the workspace. Zoom ranges from 25% to 300% relative to the fitted view, in 25% steps. Scroll to reach any part of an enlarged slide. Zoom changes only the view; saved object positions, sizes, presentation and PDF output retain the original slide geometry.
 
 Stage Aim and Keep in Mind in Studio's notes area are editable text fields. Changes autosave to the local session and are included in downloaded JSON/ZIP lessons. Use one line per reminder in Keep in Mind. Notes belong to each slide and remain hidden in student preview and presentation.
+
+## Version 1 JSON schema
+
+The current editable document is described by [`schema/lesson-v1.schema.json`](schema/lesson-v1.schema.json). Import [`public/examples/lesson-v1.json`](public/examples/lesson-v1.json) for a working example with text, an embedded image and an animation. See [`docs/lesson-version-1.md`](docs/lesson-version-1.md) for the format, clipboard images and JSON versus ZIP storage. The legacy text-based lesson-plan schema remains unchanged.
+
+## Images and Firebase on Spark
+
+Clipboard image paste, file selection and drag-and-drop still embed image bytes locally. **Image from URL** accepts direct HTTPS links and loads them with anonymous CORS, so the original host must permit it. JSON and ZIP preserve these links; linked images require internet and the host can remove them. Browser caching is not a permanent backup. PDF export works for successfully loaded CORS images.
+
+**Cloud lessons** uses Google sign-in, Realtime Database and the registered `lesson-presenter` web app. Only the verified owner account is allowed by `database.rules.json`. Saves run automatically about 2 seconds after document changes pause while signed in, capped at 2 MB per lesson in the client (rules additionally cap JSON string length), with a separate title index to avoid downloading every lesson to list them. Opening a lesson from Cloud lessons reconnects to the same record; importing a local lesson starts a new cloud record. Reopening or reloading the app starts a blank workspace. Unchanged snapshots do not upload again. Writes are serialized, pending saves are canceled on lesson/account changes, and failed cloud saves leave the local copy intact. The header shows cloud pending/saving/saved/error status separately from local saving. The manual cloud save button retries immediately, and reconnecting retries unsaved changes. Clipboard images remain embedded in cloud JSON, so large image-heavy lessons should stay local or use linked images. There is no Firebase Storage upload or billing upgrade. Spark quotas still apply across all saved lessons and downloads.
+
+Firebase configuration is in `src/firebase-config.js`; these web identifiers are public, and access is enforced by database rules. The Google provider is enabled, the owner-only rules are published, and `localhost` plus `127.0.0.1` are authorized for development. Add your actual hosting domain to Authentication authorized domains when deployed. Build with `pnpm build`; `firebase.json` is ready for Firebase Hosting of `dist`, but no site has been deployed. Do not enable open/test-mode database rules.
+
+### Live synchronization and diagnostics
+
+Open **Cloud lessons** in each browser, sign in as the owner and choose the same record. The visible lesson ID and the ID suffix in each list item distinguish separate copies with identical titles. Firebase listeners receive updates for that record and its lesson index automatically. Edits still upload after a two-second pause, so other browsers update after that upload. A clean browser applies incoming changes without uploading them back. If both copies have unsaved changes, pending autosave pauses and the Cloud lessons dialog offers **Load cloud version** or **Keep my changes**. This is whole-lesson synchronization, without simultaneous text merging. An upload already sent cannot be canceled; keep only one active editor when resolving conflicts.
+
+Under **Cloud lessons → Sync diagnostics**, inspect the recent timeline or **Download diagnostic logs** from each browser. Up to 300 events per tab survive reload via session storage: startup, authentication state, local snapshots, active lesson IDs, upload starts/acknowledgments/failures, database connectivity, received updates, applied updates, conflicts, crashes and unhandled promise rejections. Logs omit lesson documents/image payloads and redact URLs/API keys from error text. Logging does not transmit logs to a server. Private browsing or disabled storage still permits an in-memory diagnostic timeline.
+
+### Cloud updates and deletion
+
+Cloud saves update the current lesson's stable ID while it is open. After a reload, explicitly reopen the record from Cloud lessons. Creating a new imported lesson starts a new cloud record. Each cloud lesson has a **Delete** button. After confirmation, deletion removes its cloud document, cloud list entry, and matching browser autosave. If that lesson is open, the workspace and undo history reset to a blank slide. Other signed-in browsers with that lesson open also clear it when they receive the deletion. Pending autosaves are cancelled, and late updates cannot recreate a deleted record. The blank workspace is not automatically uploaded; import another lesson or explicitly save a new one. Existing JSON/ZIP files previously downloaded outside the app are separate files.
+
+Each teacher slide's organization controls include a trash-bin button. Deleting a slide removes its scene and guidance from the current lesson while keeping the same cloud lesson ID. Deleting the final slide leaves a blank slide. Slide deletion controls are absent from Student preview and presentation.
+
+### Incremental cloud sync
+
+Cloud lessons uses `/cloudLessons/<uid>/lessons` and incremental sync for every save: only changed fields and new image assets are uploaded. Existing experimental copies appear in the main lesson list. Older JSON cloud records upgrade on first open using the same lesson ID; the old record is kept as a recovery copy and is never updated. Deleting a lesson removes both representations and its local autosave. See [sync behavior and testing](docs/incremental-sync-experiment.md).
+
+The former `syncTests` location is migrated automatically with IDs, image assets and revisions preserved. Migration completion disables the old path; refresh older app tabs before continuing work.

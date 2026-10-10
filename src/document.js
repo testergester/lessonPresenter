@@ -1,4 +1,5 @@
 import JSZip from 'jszip';
+import {imageURL} from './image-url.js';
 
 export const SLIDE_WIDTH = 1280;
 export const SLIDE_HEIGHT = 720;
@@ -23,6 +24,7 @@ export function fitSlide(width, height = Infinity) {
 }
 export function validateDocument(doc, {assetsAllowed=false}={}) {
   if (doc?.format !== DOCUMENT_FORMAT || doc.version !== 1) throw new Error('This editable lesson format is not supported.');
+  if(doc.cloud!==undefined&&(!doc.cloud||typeof doc.cloud.id!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(doc.cloud.id)||!Number.isSafeInteger(doc.cloud.revision)||doc.cloud.revision<1))throw new Error('The cloud lesson ID or revision is invalid.');
   if (!doc.lesson || !Array.isArray(doc.lesson.pages) || !doc.lesson.pages.length || doc.lesson.pages.length > 300) throw new Error('The lesson must contain 1–300 slides.');
   if (doc.lesson.pages.some(page => !page || typeof page.title !== 'string' || !Array.isArray(page.questions) || page.questions.some(question => !question || typeof question.prompt !== 'string'))) throw new Error('The lesson stage metadata is invalid.');
   if (doc.lesson.pages.some(page=>page.hidden!==undefined&&typeof page.hidden!=='boolean')) throw new Error('Slide visibility must be true or false.');
@@ -31,7 +33,7 @@ export function validateDocument(doc, {assetsAllowed=false}={}) {
     if (!object || !ALLOWED_OBJECTS.has(object.type)) throw new Error('The lesson contains an unsupported canvas object.');
     if (object.lpVideoId && !/^[a-zA-Z0-9_-]{11}$/.test(object.lpVideoId)) throw new Error('A video link is invalid.');
     if ((object.fill && typeof object.fill !== 'string') || (object.stroke && typeof object.stroke !== 'string')) throw new Error('Unsupported canvas fill or stroke.');
-    if (object.src && !/^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,/i.test(object.src) && !(assetsAllowed && object.src.startsWith('assets/'))) throw new Error('Images must be included inside the lesson file.');
+      if (object.src && !/^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,/i.test(object.src) && !imageURL(object.src) && !(assetsAllowed && object.src.startsWith('assets/'))) throw new Error('Images must be embedded or use an HTTPS image URL.');
     ['left','top','width','height','scaleX','scaleY','angle','lpImageRadius','strokeWidth'].forEach(key => {
       if (object[key] !== undefined && !Number.isFinite(object[key])) throw new Error('A canvas object has invalid geometry.');
     });
@@ -132,6 +134,16 @@ export async function readSession() {
     request.onerror = () => reject(request.error);
     transaction.oncomplete = () => db.close();
   });
+}
+export async function clearSavedCloudLesson(id,uid){
+  const db=await openDatabase();
+  try{
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction('sessions','readwrite'),store=tx.objectStore('sessions'),request=store.get('current');
+      request.onsuccess=()=>{const binding=request.result?.cloudLessonBinding;if(binding?.id===id&&binding.uid===uid)store.delete('current');};
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('Local lesson deletion interrupted.'));
+    });
+  }finally{db.close();}
 }
 function openDatabase() {
   return new Promise((resolve,reject) => {

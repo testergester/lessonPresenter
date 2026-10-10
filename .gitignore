@@ -33,3 +33,6 @@ test-results/
 # Local tooling settings
 .pnpm-store/
 .env.local
+
+# Generated lesson previews and local verification artifacts
+output/

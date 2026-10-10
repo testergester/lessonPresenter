@@ -26,11 +26,28 @@ test('rejects unsupported documents and untrusted external image/fill sources',(
   const doc=document();assert.equal(validateDocument(doc),doc);
   assert.throws(()=>validateDocument({...doc,version:2}),/not supported/);
   const mismatch=document();mismatch.slides=[];assert.throws(()=>validateDocument(mismatch),/does not match/);
-  const remote=document();remote.slides[0].objects[1].src='https://example.com/image.png';assert.throws(()=>validateDocument(remote),/included inside/);
+  const remote=document();remote.slides[0].objects[1].src='javascript:alert(1)';assert.throws(()=>validateDocument(remote),/HTTPS/);
   const pattern=document();pattern.slides[0].objects[0].fill={type:'pattern',source:'https://example.com/image.png'};assert.throws(()=>validateDocument(pattern),/fill or stroke/);
   const badGeometry=document();badGeometry.slides[0].objects[0].left=NaN;assert.throws(()=>validateDocument(badGeometry),/geometry/);
 });
 test('missing packaged assets fail before changing the active lesson',async()=>{
   const doc=document();doc.slides[0].objects[1].src='assets/missing.png';const zip=new JSZip();zip.file('lesson.json',JSON.stringify(doc));
   const bytes=await zip.generateAsync({type:'uint8array'});await assert.rejects(()=>unpackLesson({size:bytes.length,arrayBuffer:async()=>bytes}),/Missing image/);
+});
+
+test('linked images survive JSON and ZIP without becoming uploads',async()=>{
+  const doc=document();doc.slides[0].objects[1].src='https://example.com/image.png';doc.slides[0].objects[1].crossOrigin='anonymous';
+  validateDocument(doc);const bytes=await (await packLesson(doc)).arrayBuffer();const zip=await JSZip.loadAsync(bytes);assert.equal(Object.keys(zip.files).filter(path=>path.startsWith('assets/')).length,0);
+  assert.deepEqual(await unpackLesson({size:bytes.byteLength,arrayBuffer:async()=>bytes}),doc);
+});
+
+test('local cloud deletion removes only the matching saved session',async()=>{
+ const {clearSavedCloudLesson}=await import('../src/document.js');
+ const original=globalThis.indexedDB;let saved,closed=0;
+ globalThis.indexedDB={open(){const request={};queueMicrotask(()=>{request.result={close(){closed++;},transaction(){const tx={};const store={get(){const getRequest={};queueMicrotask(()=>{getRequest.result=saved;getRequest.onsuccess();queueMicrotask(()=>tx.oncomplete());});return getRequest;},delete(key){assert.equal(key,'current');saved=undefined;}};tx.objectStore=()=>store;return tx;}};request.onsuccess();});return request;}};
+ try{
+  saved={cloudLessonBinding:{uid:'owner',id:'a'},document:{lesson:{title:'Deleted'}}};await clearSavedCloudLesson('a','other-user');assert.ok(saved);
+  await clearSavedCloudLesson('other','owner');assert.ok(saved);
+  await clearSavedCloudLesson('a','owner');assert.equal(saved,undefined);assert.equal(closed,3);
+ }finally{globalThis.indexedDB=original;}
 });

@@ -2014,3 +2014,23 @@ body.audience-mode .animation-playback {display:none;}
   .compact-dock .insert-tools,.compact-dock .board-tools {padding-left:5px;}
   .compact-dock .stage-progress {width:75px;}
 }
+
+/* Only an explicitly opened video player uses the HTML media layer. */
+.video-playback-controls {position:absolute;right:8px;bottom:8px;display:flex;gap:6px;align-items:center;z-index:3;background:#fff;padding:4px;border:1px solid var(--line);border-radius:5px;}
+.video-playback-controls[hidden] {display:none;}
+.video-playback-controls select,.video-playback-controls button {font:12px Arial,sans-serif;max-width:160px;min-height:30px;border:1px solid var(--line);border-radius:4px;background:white;padding:4px 7px;}
+.video-player {border-radius:0;}
+.video-player-close {position:absolute;right:6px;top:6px;min-width:40px;min-height:40px;border:1px solid #fff;border-radius:4px;background:#202d45;color:white;font:28px Arial,sans-serif;}
+@media print{.video-playback-controls,.media-layer {display:none!important;}}
+
+.cloud-lesson-row {display:flex;align-items:stretch;gap:8px;margin-top:8px;}
+.cloud-lesson-open {flex:1;min-width:0;text-align:left;overflow-wrap:anywhere;}
+.cloud-lesson-delete {flex:none;color:#a12c38;}
+.cloud-lesson-delete:hover {border-color:#a12c38;background:#fff3f4;}
+.stage-action.stage-delete {margin-left:0;padding:0 5px;color:#a12c38;display:inline-flex;align-items:center;justify-content:center;}
+.stage-tools [data-stage-action=visibility] {margin-left:auto;display:inline-flex;align-items:center;justify-content:center;padding:3px;}
+.stage-tools [data-stage-action=visibility] svg {width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;}
+.stage-tools [data-stage-action=visibility][aria-pressed=true] {color:var(--green);}
+.cloud-experiment { margin-top: 18px; border-top: 1px solid var(--border, #dfe4ed); padding-top: 14px; }
+.cloud-experiment summary { cursor: pointer; font-weight: 600; }
+#cloudSyncComparison { font-size: 13px; line-height: 1.6; }

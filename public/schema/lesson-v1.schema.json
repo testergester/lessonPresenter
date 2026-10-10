@@ -1,0 +1,516 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lesson Presenter — Version 1",
+  "description": "Standalone editable JSON document. Fixed 1280 × 720 Fabric scenes. Page and slide arrays must have the same length and corresponding order; the app checks this cross-array constraint. Additional Fabric properties are retained.",
+  "type": "object",
+  "required": [
+    "format",
+    "version",
+    "lesson",
+    "slides"
+  ],
+  "properties": {
+    "format": {
+      "const": "lesson-presenter"
+    },
+    "version": {
+      "const": 1
+    },
+    "lesson": {
+      "type": "object",
+      "required": [
+        "pages"
+      ],
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "pages": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 300,
+          "items": {
+            "$ref": "#/$defs/page"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "slides": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 300,
+      "items": {
+        "$ref": "#/$defs/slide"
+      }
+    },
+    "roster": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "revealedAnswerCountByPage": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "cloud": {
+      "type": "object",
+      "description": "Last confirmed cloud lesson identity and revision. Informational on import; it never authorizes overwriting a cloud lesson.",
+      "required": [
+        "id",
+        "revision"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "imageSource": {
+      "type": "string",
+      "description": "Embedded PNG, JPEG, WebP, GIF or SVG bytes, or a direct HTTPS image URL. Linked images need a reachable host with CORS support.",
+      "anyOf": [
+        {
+          "pattern": "^[dD][aA][tT][aA]:[iI][mM][aA][gG][eE]/([pP][nN][gG]|[jJ][pP][eE][gG]|[wW][eE][bB][pP]|[gG][iI][fF]|[sS][vV][gG]\\+[xX][mM][lL]);[bB][aA][sS][eE]64,[A-Za-z0-9+/]+={0,2}$"
+        },
+        {
+          "pattern": "^https://[^/@\\s]+(?:[/?#][^\\s]*)?$"
+        }
+      ]
+    },
+    "page": {
+      "type": "object",
+      "required": [
+        "title",
+        "questions"
+      ],
+      "properties": {
+        "stageId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "stageType": {
+          "type": "string"
+        },
+        "durationMinutes": {
+          "type": "number"
+        },
+        "aim": {
+          "type": "string"
+        },
+        "interaction": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "teacherNotes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "procedure": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "timingNotes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "instructions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "anticipatedProblems": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "problem",
+              "solution"
+            ],
+            "properties": {
+              "problem": {
+                "type": "string"
+              },
+              "solution": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "prompt"
+            ],
+            "properties": {
+              "prompt": {
+                "type": "string"
+              },
+              "answer": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "slide": {
+      "type": "object",
+      "required": [
+        "objects"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "Fabric version; separate from the root document version."
+        },
+        "background": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "objects": {
+          "type": "array",
+          "maxItems": 5000,
+          "items": {
+            "$ref": "#/$defs/canvasObject"
+          }
+        },
+        "lpAnimations": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "$ref": "#/$defs/animation"
+          }
+        },
+        "backgroundImage": {
+          "type": "null"
+        },
+        "overlayImage": {
+          "type": "null"
+        },
+        "clipPath": {
+          "type": "null"
+        }
+      },
+      "additionalProperties": true
+    },
+    "canvasObject": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "left": {
+          "type": "number"
+        },
+        "top": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number"
+        },
+        "height": {
+          "type": "number"
+        },
+        "scaleX": {
+          "type": "number"
+        },
+        "scaleY": {
+          "type": "number"
+        },
+        "angle": {
+          "type": "number"
+        },
+        "skewX": {
+          "type": "number"
+        },
+        "skewY": {
+          "type": "number"
+        },
+        "strokeWidth": {
+          "type": "number"
+        },
+        "lpImageRadius": {
+          "type": "number"
+        },
+        "fontSize": {
+          "type": "number"
+        },
+        "radius": {
+          "type": "number"
+        },
+        "rx": {
+          "type": "number"
+        },
+        "ry": {
+          "type": "number"
+        },
+        "x1": {
+          "type": "number"
+        },
+        "y1": {
+          "type": "number"
+        },
+        "x2": {
+          "type": "number"
+        },
+        "y2": {
+          "type": "number"
+        },
+        "cropX": {
+          "type": "number"
+        },
+        "cropY": {
+          "type": "number"
+        },
+        "type": {
+          "enum": [
+            "Textbox",
+            "IText",
+            "Text",
+            "Rect",
+            "Circle",
+            "Ellipse",
+            "Triangle",
+            "Line",
+            "Path",
+            "Polygon",
+            "Polyline",
+            "Group",
+            "Image",
+            "textbox",
+            "i-text",
+            "text",
+            "rect",
+            "circle",
+            "ellipse",
+            "triangle",
+            "line",
+            "path",
+            "polygon",
+            "polyline",
+            "group",
+            "image"
+          ]
+        },
+        "lpId": {
+          "type": "string"
+        },
+        "lpRole": {
+          "type": "string"
+        },
+        "lpAnswerIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lpVideoId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{11}$"
+        },
+        "lpAnnotation": {
+          "type": "boolean"
+        },
+        "lpSticker": {
+          "type": [
+            "string",
+            "boolean"
+          ]
+        },
+        "lpLabel": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "src": {
+          "$ref": "#/$defs/imageSource"
+        },
+        "fill": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stroke": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "objects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/canvasObject"
+          }
+        },
+        "clipPath": {
+          "$ref": "#/$defs/canvasObject"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "Image",
+                  "image"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "src"
+            ],
+            "properties": {
+              "src": {
+                "$ref": "#/$defs/imageSource"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "Group",
+                  "group"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "objects"
+            ],
+            "properties": {
+              "objects": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/canvasObject"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "lpVideoId"
+            ],
+            "properties": {
+              "lpVideoId": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_-]{11}$"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "Rect",
+                  "rect"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "additionalProperties": true
+    },
+    "animation": {
+      "type": "object",
+      "required": [
+        "id",
+        "effect",
+        "trigger",
+        "targets",
+        "delay"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "effect": {
+          "enum": [
+            "appear",
+            "disappear"
+          ]
+        },
+        "trigger": {
+          "enum": [
+            "click",
+            "after",
+            "with"
+          ]
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5000,
+          "items": {
+            "type": "string"
+          }
+        },
+        "delay": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60000,
+          "description": "Milliseconds, not seconds."
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}
