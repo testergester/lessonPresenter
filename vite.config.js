@@ -2,6 +2,7 @@ import {defineConfig} from 'vite';
 import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 export default defineConfig({
+  base:process.env.PAGES_BASE_PATH||'/',
   build:{rollupOptions:{input:{workspace:'index.html',studio:'studio.html'}}},
   plugins:[{
     name:'offline-lesson-assets',
