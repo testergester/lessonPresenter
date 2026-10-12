@@ -309,7 +309,14 @@ body.studio.audience-mode.presentation-navigation-visible .presentation-bar,
 body.studio.audience-mode .presentation-bar:focus-within {transform:translateY(0);}
 .presentation-edge {position:fixed;inset:0 0 auto;z-index:79;height:12px;min-height:0;width:100%;padding:0;border:0;background:transparent;}
 .presentation-edge:focus-visible {background:#3866e530;outline:2px solid #3866e5;outline-offset:-2px;}
-.presentation-tools {position:fixed;z-index:70;bottom:max(16px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);max-width:calc(100vw - 24px);padding:6px;background:#fffefef2;border:1px solid #dce2eb;border-radius:12px;box-shadow:0 4px 24px #17233a26;color:#263447;}
+.presentation-tools {position:fixed;z-index:70;width:44px;height:44px;left:calc(50% - 22px);bottom:16px;color:#263447;}
+.presentation-tools .presentation-tools-handle {width:44px;height:44px;min-width:44px;min-height:44px;padding:11px;border:1px solid #dce2eb;border-radius:50%;background:#fffefef2;box-shadow:0 4px 24px #17233a26;cursor:grab;touch-action:none;user-select:none;}
+.presentation-tools-handle svg {width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+.presentation-tools.is-dragging .presentation-tools-handle {cursor:grabbing;}
+.presentation-tools-content {position:absolute;left:52px;top:0;width:max-content;max-width:calc(100vw - 16px);padding:6px;background:#fffefef2;border:1px solid #dce2eb;border-radius:12px;box-shadow:0 4px 24px #17233a26;}
+.presentation-tools-content .presentation-tool-row {flex-wrap:wrap;}
+.presentation-tools-content .presentation-timer-panel {position:static;margin-top:6px;width:100%;max-height:calc(100dvh - 110px);overflow:auto;box-shadow:none;}
+
 .presentation-tool-row {display:flex;align-items:center;gap:4px;}
 .presentation-tools button {display:flex;align-items:center;justify-content:center;gap:6px;min-height:38px;min-width:38px;padding:7px 10px;border:0;border-radius:7px;background:transparent;font:600 13px Arial,sans-serif;color:inherit;white-space:nowrap;}
 .presentation-tools button:hover,.presentation-tools button[aria-pressed=true],.presentation-tools button[aria-expanded=true] {background:#edf2ff;color:#315fcd;}
@@ -324,7 +331,7 @@ body.studio.audience-mode .presentation-bar:focus-within {transform:translateY(0
 .presentation-laser {position:fixed;z-index:65;width:14px;height:14px;border:2px solid white;border-radius:50%;background:#ef3340;box-shadow:0 0 0 6px #ef334033,0 0 20px #ef3340aa;transform:translate(-50%,-50%);pointer-events:none;}
 body.presentation-laser-active #teacherStage {cursor:crosshair;}
 @media(prefers-reduced-motion:reduce){body.studio.audience-mode .presentation-bar {transition:none;}}
-@media(max-width:480px){.presentation-tools button {padding:7px;gap:4px;}.presentation-tools {bottom:10px;}.studio .presentation-bar {padding:10px;flex-wrap:wrap;}.studio .presentation-bar>div {gap:6px;}}
+@media(max-width:480px){.presentation-tools button {padding:7px;gap:4px;}.studio .presentation-bar {padding:10px;flex-wrap:wrap;}.studio .presentation-bar>div {gap:6px;}}
 @media print{.presentation-tools,.presentation-edge,.presentation-laser {display:none!important;}}
 .presentation-sync-status {display:block;max-width:340px;padding:2px 7px 4px;font-size:10px;text-align:center;color:#667087;}
 .presentation-session-review {padding:14px;border:1px solid var(--line);border-radius:6px;background:white;margin-top:14px;}

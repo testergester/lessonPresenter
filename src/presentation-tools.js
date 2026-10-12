@@ -1,3 +1,4 @@
+import {installFloatingTools} from './floating-tools.js';
 // Presentation controls reuse the lesson's pen and stage timer.
 export function installPresentationTools() {
   const $=id=>document.getElementById(id);
@@ -5,7 +6,8 @@ export function installPresentationTools() {
   trigger.className='presentation-edge';trigger.type='button';trigger.hidden=true;
   trigger.setAttribute('aria-label','Show presentation navigation');trigger.setAttribute('aria-controls','presentationBar');
   const dock=document.createElement('div');dock.className='presentation-tools';dock.hidden=true;
-  dock.innerHTML=`<div class="presentation-tool-row" role="group" aria-label="Presentation tools">
+  dock.innerHTML=`<button type="button" class="presentation-tools-handle" aria-label="Presentation tools — drag to move" aria-expanded="false" aria-controls="presentationToolsContent" title="Presentation tools · drag to move"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m13 6 5 5"/></svg></button>
+  <div id="presentationToolsContent" class="presentation-tools-content" hidden><div class="presentation-tool-row" role="group" aria-label="Presentation tools">
     <button type="button" data-tool="pen" aria-pressed="false" title="Annotate slide (A)">✎ <span>Pen</span></button>
     <button type="button" data-tool="laser" aria-pressed="false" title="Point to the slide">⊙ <span>Laser</span></button>
     <button type="button" data-tool="undo" aria-label="Undo annotation" title="Undo annotation">↶</button>
@@ -16,10 +18,12 @@ export function installPresentationTools() {
     <label>Minutes <input type="number" min="1" max="180" value="5" aria-label="Presentation timer minutes"></label>
     <span data-state aria-live="polite"></span>
     <div><button type="button" data-tool="start">Start timer</button><button type="button" data-tool="reset">Reset</button></div>
-  </div>`;
+  </div></div>`;
   const laser=document.createElement('div');laser.className='presentation-laser';laser.hidden=true;laser.setAttribute('aria-hidden','true');
   document.body.append(trigger,dock,laser);
-  const syncStatus=document.createElement('span');syncStatus.className='presentation-sync-status';syncStatus.textContent='Annotations are separate from the saved lesson';dock.append(syncStatus);
+  const content=dock.querySelector('.presentation-tools-content');
+  const syncStatus=document.createElement('span');syncStatus.className='presentation-sync-status';syncStatus.textContent='Annotations are separate from the saved lesson';content.append(syncStatus);
+  const floating=installFloatingTools(dock,dock.querySelector('.presentation-tools-handle'),content);
   document.addEventListener('presentation:status',event=>{syncStatus.textContent=event.detail.text;});
   const button=tool=>dock.querySelector(`[data-tool="${tool}"]`);
   const panel=dock.querySelector('#presentationTimerPanel'),minutes=dock.querySelector('input');
@@ -68,9 +72,10 @@ export function installPresentationTools() {
   document.addEventListener('studio:timer',syncTimer);
   function syncMode() {
     trigger.hidden=dock.hidden=!presenting();
+    floating.refresh();
     const pen=document.body.classList.contains('annotation-active');button('pen').setAttribute('aria-pressed',String(pen));
     if(!presenting()||pen)setLaser(false);
-    if(!presenting()){clearTimeout(hideNavigation);if(document.body.classList.contains('presentation-navigation-visible'))document.body.classList.remove('presentation-navigation-visible');panel.hidden=true;button('timer').setAttribute('aria-expanded','false');}
+    if(!presenting()){floating.collapse();clearTimeout(hideNavigation);if(document.body.classList.contains('presentation-navigation-visible'))document.body.classList.remove('presentation-navigation-visible');panel.hidden=true;button('timer').setAttribute('aria-expanded','false');}
   }
   document.addEventListener('studio:mode',syncMode);
   document.addEventListener('studio:drawing',syncMode);
