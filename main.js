@@ -14,6 +14,7 @@ let annotationStateByPage = [];
 let boardEditor = null;
 let saveChain = Promise.resolve();
 let cloudLessonBinding=null;
+let presentationSync=null;
 let clearingCloudLesson=false;
 let pendingLessonFile = null;
 let selectedColor = penColors[0];
@@ -568,6 +569,7 @@ function renderTimer() {
   $('timerState').textContent = timerRunning ? 'TIME TO LEARN' : remainingSeconds===0 ? 'TIME’S UP' : timerStarted ? 'PAUSED' : 'READY WHEN YOU ARE';
   $('startTimerBtn').hidden=timerRunning;$('pauseTimerBtn').hidden=!timerRunning;
   $('startTimerBtn').textContent = timerStarted&&remainingSeconds>0 ? 'Resume timer' : remainingSeconds===0 ? 'Restart timer' : 'Start timer';
+  if(document.body.dataset?.layout==='studio')document.dispatchEvent(new CustomEvent('studio:timer'));
 }
 function startTimer() {
   if (timerRunning) return;
@@ -602,10 +604,13 @@ function setPreview(enabled) {
 function setAudienceMode(enabled) {
   if(enabled&&lesson.pages.length&&!stageIndices(true).length){setStatus('Show at least one slide in the lesson plan before presenting.');return;}
   revealedAnswerCountByPage=lesson.pages.map(()=>0);
+  if(enabled){boardEditor?.snapshot();boardEditor?.setPresentationSession({},true,true).catch(error=>setStatus(error.message));}
   document.body.classList.toggle('audience-mode',enabled);
+  document.dispatchEvent(new CustomEvent('presentation:mode',{detail:{presenting:enabled}}));
+  if(!enabled&&!presentationSync&&boardEditor){boardEditor.presentationActive=false;boardEditor.showPresentationAnnotations(false);}
   if(document.body.dataset?.layout==='studio')document.dispatchEvent(new CustomEvent('studio:mode',{detail:{preview:document.body.classList.contains('preview-mode'),presenting:enabled}}));
   $('presentationBar').hidden=!enabled;
-  if (enabled) {setAnnotation(false);$('exitPresentBtn').focus();} else $('audienceViewBtn').focus();
+  if (enabled) {setAnnotation(false);$(document.body.dataset?.layout==='studio'?'teacherStage':'exitPresentBtn').focus();} else {setAnnotation(false);$('audienceViewBtn').focus();}
   if(lesson.pages.length){renderOutline();if(studentMode()&&lesson.pages[currentPageIndex].hidden)goToStage(stageIndices(true)[0]);else showPage(currentPageIndex);}
   syncDrawing();
   requestAnimationFrame(resizeVisibleCanvases);
@@ -620,7 +625,7 @@ function setDisplayMode(mode) {
 function syncDrawing() {
   const presenting = document.body.classList.contains('audience-mode');
   const preview = document.body.classList.contains('preview-mode');
-  boardEditor?.setMode({readonly:presenting || preview,preview,drawing:annotatorEnabled&&!presenting});
+  boardEditor?.setMode({readonly:presenting || preview,preview,drawing:annotatorEnabled});
   boardEditor?.setPen(selectedColor,selectedPenSize);
   $('drawingToolbar').hidden=!annotatorEnabled;
   $('boardPenBtn').classList.toggle('selected',annotatorEnabled);
@@ -631,6 +636,7 @@ function syncDrawing() {
   document.querySelectorAll('[data-editor-action]').forEach(button=>button.disabled=presenting||preview||button.dataset?.unavailable==='true');
   $('selectionInspector').hidden=presenting||preview||!boardEditor?.selected();
   renderPlayback(boardEditor?.getPlaybackState?.());
+  if(document.body.dataset?.layout==='studio')document.dispatchEvent(new CustomEvent('studio:drawing'));
 }
 function renderPlayback(state={total:0,remaining:0,running:false,started:false,finished:true}) {
   const presenting=document.body.classList.contains('audience-mode');
@@ -900,13 +906,16 @@ document.addEventListener('keydown',event=>{
   if(event.key==='ArrowRight'){event.preventDefault();stepPresentation(1);}
   if(event.key==='ArrowLeft'){event.preventDefault();stepPresentation(-1);}
   if(event.key.toLowerCase()==='r'){event.preventDefault();revealNextAnswer();}
-  if(event.key.toLowerCase()==='a'&&!document.body.classList.contains('audience-mode')){event.preventDefault();setAnnotation(!annotatorEnabled);}
+  if(event.key.toLowerCase()==='a'){event.preventDefault();setAnnotation(!annotatorEnabled);}
 });
 function syncOfflineBanner() {$('offlineBanner').hidden=navigator.onLine;}
 window.addEventListener('online',syncOfflineBanner);window.addEventListener('offline',syncOfflineBanner);
 window.addEventListener('pagehide',()=>{if(lesson.pages.length)persistSnapshot();});
 boardEditor=new SlideEditor($('teacherStage'),{
   onChange:queueSnapshot,onSelection:renderSelection,
+  onPresentationChange:(index,objects)=>presentationSync?.change(index,objects),
+  onPresentationDraft:value=>presentationSync?.draft(value),
+  onSlideReady:()=>presentationSync?.slideReady(),
   onPlayback:renderPlayback,
   onHistory:state=>{['undoAnnotationBtn','quickUndoBtn'].forEach(id=>$(id).disabled=!state.undo);['redoAnnotationBtn','quickRedoBtn'].forEach(id=>$(id).disabled=!state.redo);$('editorUndoBtn').disabled=!state.editing||!state.undo;$('editorRedoBtn').disabled=!state.editing||!state.redo;},
   onError:setStatus,onTitleChange:(index,title)=>{if(lesson.pages[index]&&lesson.pages[index].title!==title){lesson.pages[index].title=title;renderOutline();$('stageBreadcrumb').textContent=title;}}
@@ -928,6 +937,10 @@ $('addImageUrlBtn').addEventListener('click',()=>{setAnnotation(false);openTools
 $('insertImageUrlBtn').addEventListener('click',async()=>{const button=$('insertImageUrlBtn');$('imageUrlError').hidden=true;$('imageUrlFallback').hidden=true;button.disabled=true;try{await boardEditor.addImageFromURL($('imageUrl').value);closeTools();setStatus('Linked image added. Keep its source available to reopen this lesson.');}catch(error){$('imageUrlError').textContent=error.message;$('imageUrlError').hidden=false;const url=imageURL($('imageUrl').value);if(url){$('imageUrlSource').href=url;$('imageUrlFallback').hidden=false;}}finally{button.disabled=false;}});
 $('cloudBtn').addEventListener('click',()=>openTools('section-cloud'));
 import('./src/cloud-ui.js').then(({setupCloudUI})=>setupCloudUI({currentDocument,clearLocal:clearDeletedCloudLesson,getBinding:()=>cloudLessonBinding,setBinding:(value,save=true)=>{cloudLessonBinding=value;if(save)persistSnapshot();},load:async(doc,{remote=false}={})=>{const previousIndex=currentPageIndex;validateDocument(doc);initLesson(doc.lesson,doc.slides);roster=list(doc.roster);$('studentRoster').value=roster.join('\n');revealedAnswerCountByPage=lesson.pages.map(()=>0);if(remote)showPage(Math.min(previousIndex,lesson.pages.length-1));await boardEditor.queue;syncAnswers();persistSnapshot();if(!remote)closeTools();},setStatus})).catch(error=>{diagnostics.log('cloud-init-failed',{message:error.message,stack:error.stack});$('cloudStatus').textContent='Cloud connection unavailable. Local saving still works. Open diagnostics for details.';$('cloudSaveIndicator').textContent='Cloud: connection unavailable';$('cloudSaveIndicator').dataset.state='disconnected';});
+import('./src/presentation-sync.js').then(({setupPresentationSync})=>{
+  presentationSync=setupPresentationSync({editor:boardEditor,getBinding:()=>cloudLessonBinding,currentDocument,setStatus});
+  if(document.body.classList.contains('audience-mode'))presentationSync.enter();
+}).catch(error=>setStatus(`Live annotation sync unavailable: ${error.message}`));
 $('addImageBtn').addEventListener('click',()=>$('imageFile').click());
 $('uploadImageFallbackBtn').addEventListener('click',()=>$('imageFile').click());
 $('imageFile').addEventListener('change',async event=>{const file=event.target.files[0];if(file){try{await boardEditor.addImage(file);closeTools();}catch(error){setStatus(error.message);}}event.target.value='';});

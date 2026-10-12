@@ -110,6 +110,16 @@ Select one or more objects (Shift-click or drag a selection box), open **Animati
 
 Effects play in Student preview and Present. Click the board, press Space while the board is focused, or use **Next effect**. Stage navigation remains separate. Student preview also has **Replay effects**. Returning to Teacher restores normal editing visibility. The Animations list lets you drag effects or use up/down buttons to reorder them, and remove effects. Relative start timing follows the new preceding effect; editing undo/redo also covers animation changes. Sequences are included in JSON/ZIP saves and slide duplication. PDF exports are static and show the authored content, subject to the answer and annotation export options.
 
+### Live presentation annotations
+
+Lessons remain in Firebase Realtime Database. Presentation pen drawings use a separate `presentationSessions/{uid}/{lessonId}` namespace; they are never added to the raw lesson, lesson autosave, JSON/ZIP downloads, thumbnails, or lesson print exports. Authored annotations already saved in the lesson are preserved by presentation clear/undo.
+
+Sign in and open an already saved cloud lesson, then choose **Present**. Completed strokes, undo, and clear send database writes immediately, independently of the lesson's two-second autosave debounce. Pen previews update at most every 50 milliseconds while drawing. Network latency and connection availability still apply. A second browser signed in as the same owner and presenting the same lesson joins the active session. It receives overlays without reloading the lesson.
+
+After exiting presentation, open **Teach → Presentation annotations**, select a saved presentation, and use **Show annotations / Hide annotations**. Overlays remain separate even when shown in Teacher view. Review requires the same lesson version, so drawings are not placed over slides that have since changed. Sessions are kept as separate history entries; the original presenter ending a session archives it. With no cloud lesson or signed-in account, drawings are held only in the current browser tab and are lost on reload.
+
+The new `database.rules.json` namespace must be deployed before cloud annotation sync is enabled. It uses the existing verified Google owner identity and rejects anonymous access, other accounts, unsupported session fields, and oversized stroke payloads. The application reports sync errors and keeps failed local drawings separate from the lesson. It never reports a failed write as saved.
+
 ## Alternate Studio interface
 
 Open `/studio.html` for the presentation editor layout inspired by PPTist: fixed top toolbar, slide thumbnails and organization on the left, and Design / Animations / Teach panels on the right. Top toolbar tools open compact dropdowns directly beneath their buttons. Object properties stay in the right panel; its Animations tab opens the full effect list. Dropdowns close on outside click, Escape, or completion of an insert action. Import and keyboard help retain their dialogs. Panel buttons at the top let you reclaim canvas space.

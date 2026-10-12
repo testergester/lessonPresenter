@@ -10,7 +10,7 @@ import {imageURL} from './image-url.js';
 const descendants = objects => objects.flatMap(object=>[object,...descendants(object.getObjects?.()||[])]);
 const serializedDescendants = objects => objects.flatMap(object=>[object,...serializedDescendants(object.objects||[])]);
 
-const CUSTOM = ['lpId','lpRole','lpAnswerIndex','lpVideoId','lpAnnotation','lpLabel','lpSticker','lpImageRadius'];
+const CUSTOM = ['lpId','lpRole','lpAnswerIndex','lpVideoId','lpAnnotation','lpSessionAnnotation','lpLabel','lpSticker','lpImageRadius'];
 FabricObject.customProperties = CUSTOM;
 FabricObject.ownDefaults.originX='left';
 FabricObject.ownDefaults.originY='top';
@@ -87,10 +87,26 @@ export class SlideEditor {
       if(object?.lpVideoId){event.stopImmediatePropagation();this.playVideo(object.lpId);}
     },true);
     ['object:modified','text:editing:exited','path:created'].forEach(event=>this.canvas.on(event,()=>{
-      if(event==='path:created')this.canvas.getObjects().filter(o=>o.type==='path'&&!o.lpId).forEach(o=>{o.lpId=uid();o.lpAnnotation=true;});
+      if(event==='path:created')this.canvas.getObjects().filter(o=>o.type==='path'&&!o.lpId).forEach(o=>{o.lpId=uid();o.lpAnnotation=true;if(this.presentationActive)o.lpSessionAnnotation=true;});
       if(this.readonly&&event==='path:created')this.recordAnnotations();
       this.commit();
+      if(event==='path:created'&&this.presentationActive)this.callbacks.onPresentationDraft?.(null);
     }));
+    let draft=null;
+    const draftPoint=event=>{const point=this.canvas.getScenePoint(event.e);return [point.x,point.y];};
+    this.canvas.on('mouse:down',event=>{
+      if(!this.presentationActive||!this.drawing||!this.ready)return;
+      draft={index:this.index,color:this.canvas.freeDrawingBrush.color,width:this.canvas.freeDrawingBrush.width,points:[draftPoint(event)]};
+      this.callbacks.onPresentationDraft?.(structuredClone(draft));
+    });
+    this.canvas.on('mouse:move',event=>{
+      if(!draft||!this.presentationActive||!this.drawing)return;
+      draft.points.push(draftPoint(event));
+      // Bound the live preview; the completed Fabric path retains full detail.
+      if(draft.points.length>300)draft.points=draft.points.filter((_,i)=>i%2===0);
+      this.callbacks.onPresentationDraft?.(structuredClone(draft));
+    });
+    this.canvas.on('mouse:up',()=>{draft=null;this.callbacks.onPresentationDraft?.(null);});
     ['selection:created','selection:updated','selection:cleared'].forEach(event=>this.canvas.on(event,()=>this.selectionChanged()));
     ['object:moving','object:scaling','object:rotating'].forEach(event=>this.canvas.on(event,()=>this.syncMedia()));
     this.canvas.on('object:moving',({target})=>{
@@ -105,6 +121,7 @@ export class SlideEditor {
     ++this.token;this.ready=false;this.index=-1;this.slides=structuredClone(slides).map(slide=>upgradeStickers(slide,CUSTOM));
     this.slides.forEach(slide=>corsImages(slide.objects));
     this.annotationHistories=[];
+    this.presentationPages={};this.presentationVisible=false;this.presentationActive=false;
     this.histories=this.slides.map(slide=>({undo:[JSON.stringify(slide)],redo:[]}));
   }
   reorderSlides(order) {
@@ -113,6 +130,7 @@ export class SlideEditor {
     this.histories=order.map(index=>this.histories[index]);
   }
   async show(index,revealCount=0) {
+    this.capturePresentation();
     this.snapshot();
     this.stopAnimations();
     const token=++this.token;
@@ -126,9 +144,12 @@ export class SlideEditor {
         await this.canvas.loadFromJSON(scene);
         if(token!==this.token)return;
         this.index=index;this.loading=false;this.ready=true;
+        await this.renderPresentationAnnotations();
+        if(token!==this.token)return;
         this.animations=structuredClone(scene.lpAnimations||[]);
         if(this.readonly){this.ensureAnnotationHistory();this.startAnimations();}
         this.applyVisibility();this.updateSummary();this.applyInteraction();this.resize();this.syncMedia();this.selectionChanged();this.historyChanged();
+        this.callbacks.onSlideReady?.(index);
       }catch(error){if(token===this.token){this.loading=false;this.callbacks.onError('This slide could not be loaded. '+error.message);}}
       finally{if(token===this.token)this.host.setAttribute('aria-busy','false');}
     });
@@ -142,7 +163,39 @@ export class SlideEditor {
     const normalize=objects=>objects.forEach(object=>{if(object.lpRole==='answer')object.visible=true;if(object.objects)normalize(object.objects);});
     normalize(scene.objects);return scene;
   }
-  snapshot() {if(this.ready&&!this.loading&&this.index>=0)this.slides[this.index]=this.serialize();}
+  snapshot() {
+    if(this.presentationActive)return;
+    if(this.ready&&!this.loading&&this.index>=0){
+      const scene=this.serialize();scene.objects=scene.objects.filter(object=>!object.lpSessionAnnotation);
+      this.slides[this.index]=scene;
+    }
+  }
+  capturePresentation() {
+    if(!this.ready||this.loading||this.index<0||!this.presentationVisible)return;
+    this.presentationPages||={};
+    this.presentationPages[this.index]=this.serialize().objects.filter(object=>object.lpSessionAnnotation);
+  }
+  async renderPresentationAnnotations() {
+    const token=this.token,index=this.index,renderToken=this.presentationRenderToken=(this.presentationRenderToken||0)+1;
+    const objects=await util.enlivenObjects(this.presentationVisible?this.presentationPages?.[index]||[]:[]);
+    if(token!==this.token||index!==this.index||renderToken!==this.presentationRenderToken)return;
+    this.canvas.remove(...this.canvas.getObjects().filter(object=>object.lpSessionAnnotation));
+    objects.forEach(object=>{object.lpSessionAnnotation=true;object.lpAnnotation=true;object.set({selectable:false,evented:false});this.canvas.add(object);});
+    this.canvas.requestRenderAll();
+  }
+  async setPresentationSession(pages={},active=false,visible=active) {
+    this.presentationPages=structuredClone(pages);this.presentationActive=active;this.presentationVisible=visible;
+    this.annotationHistories=[];
+    if(this.ready){await this.renderPresentationAnnotations();this.historyChanged();}
+  }
+  async receivePresentationPage(index,objects) {
+    this.presentationPages||={};this.presentationPages[index]=structuredClone(objects);
+    if(index===this.index&&this.ready){await this.renderPresentationAnnotations();this.annotationHistories[index]=undefined;this.historyChanged();}
+  }
+  async showPresentationAnnotations(visible) {
+    this.capturePresentation();this.presentationVisible=visible;
+    if(this.ready)await this.renderPresentationAnnotations();
+  }
   renameSlideTitle(index,text) {
     if(this.readonly||!this.slides[index])return false;
     if(this.ready&&!this.loading&&index===this.index){
@@ -161,13 +214,17 @@ export class SlideEditor {
   }
   commit() {
     if(!this.ready||this.loading)return;
+    if(this.presentationActive){
+      this.capturePresentation();this.syncMedia();this.updateSummary();this.historyChanged();
+      this.callbacks.onPresentationChange?.(this.index,structuredClone(this.presentationPages[this.index]||[]));return;
+    }
     this.snapshot();const history=this.histories[this.index];const value=JSON.stringify(this.slides[this.index]);
     if(value!==history.undo.at(-1)){history.undo.push(value);if(history.undo.length>80)history.undo.shift();history.redo=[];}
     const title=descendants(this.canvas.getObjects()).find(object=>object.lpRole==='title');
     if(title)this.callbacks.onTitleChange?.(this.index,title.text);
     this.syncMedia();this.updateSummary();this.historyChanged();this.callbacks.onChange();
   }
-  annotationSnapshot(){return JSON.stringify(this.serialize().objects.flatMap((object,index)=>object.lpAnnotation?[{object,index}]:[]));}
+  annotationSnapshot(){return JSON.stringify(this.serialize().objects.flatMap((object,index)=>(this.presentationActive?object.lpSessionAnnotation:object.lpAnnotation&&!object.lpSessionAnnotation)?[{object,index}]:[]));}
   ensureAnnotationHistory(){this.annotationHistories||=[];return this.annotationHistories[this.index] ||= {undo:[this.annotationSnapshot()],redo:[]};}
   recordAnnotations(){const history=this.ensureAnnotationHistory(),value=this.annotationSnapshot();if(value!==history.undo.at(-1)){history.undo.push(value);history.redo=[];}}
   async restoreAnnotations(direction){
@@ -178,7 +235,7 @@ export class SlideEditor {
     try{
       const entries=JSON.parse(value),objects=await util.enlivenObjects(entries.map(entry=>entry.object));
       if(token!==this.token||index!==this.index||!this.readonly)return;
-      this.canvas.remove(...this.canvas.getObjects().filter(object=>object.lpAnnotation));
+      this.canvas.remove(...this.canvas.getObjects().filter(object=>this.presentationActive?object.lpSessionAnnotation:object.lpAnnotation&&!object.lpSessionAnnotation));
       objects.forEach((object,i)=>this.canvas.insertAt(entries[i].index,object));
       if(direction==='undo')history.redo.push(history.undo.pop());else history.undo.push(history.redo.pop());
       this.applyInteraction();this.commit();
@@ -211,7 +268,7 @@ export class SlideEditor {
   applyInteraction() {
     this.canvas.selection=!this.readonly&&this.ready;this.canvas.skipTargetFind=this.readonly||!this.ready;
     this.canvas.isDrawingMode=!!this.drawing&&this.ready;
-    this.canvas.getObjects().forEach(object=>object.set({selectable:!this.readonly,evented:!this.readonly}));
+    this.canvas.getObjects().forEach(object=>object.set({selectable:!this.readonly&&!object.lpSessionAnnotation,evented:!this.readonly&&!object.lpSessionAnnotation}));
     this.canvas.requestRenderAll();
   }
   setReveal(count) {this.revealCount=count;this.applyVisibility();this.syncMedia();}
@@ -275,7 +332,7 @@ export class SlideEditor {
     const presentation=document.body.classList.contains('audience-mode');
     const studio=document.body.dataset?.layout==='studio';
     const style=studio?getComputedStyle(parent):null;
-    const maxHeight=presentation?Math.max(220,window.innerHeight-130):studio?Math.max(120,parent.clientHeight-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom)):Infinity;
+    const maxHeight=studio?Math.max(120,parent.clientHeight-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom)):presentation?Math.max(220,window.innerHeight-130):Infinity;
     const padding=studio?parseFloat(style.paddingLeft)+parseFloat(style.paddingRight):0;
     const fitted=fitSlide(Math.max(120,parent.clientWidth-padding),maxHeight);
     const zoom=studio&&!presentation?(this.zoom||1):1;
@@ -416,7 +473,7 @@ export class SlideEditor {
     await this.pasteObjects(this.selectedObjectsData());
   }
   moveLayer(front) {if(!this.selected()||this.readonly)return;const object=this.selected();if(front)this.canvas.bringObjectForward(object);else this.canvas.sendObjectBackwards(object);this.canvas.requestRenderAll();this.commit();}
-  clearAnnotations() {if(this.readonly)this.ensureAnnotationHistory();this.canvas.remove(...this.canvas.getObjects().filter(object=>object.lpAnnotation));if(this.readonly)this.recordAnnotations();this.commit();}
+  clearAnnotations() {if(this.readonly)this.ensureAnnotationHistory();this.canvas.remove(...this.canvas.getObjects().filter(object=>this.presentationActive?object.lpSessionAnnotation:object.lpAnnotation&&!object.lpSessionAnnotation));if(this.readonly)this.recordAnnotations();this.commit();}
   async paste(event) {
     if(!this.ready||this.readonly||this.selected()?.isEditing)return false;
     const items=[...event.clipboardData?.items||[]];const image=items.find(item=>item.type.startsWith('image/'))?.getAsFile();

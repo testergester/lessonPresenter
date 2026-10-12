@@ -10,6 +10,7 @@ export function setupCloudUI({currentDocument,load,setStatus,getBinding,setBindi
   let deletingId=null,connected=null,hasConnected=false,browserOffline=typeof navigator!=='undefined'&&!navigator.onLine;
   let measurements={saves:0,whole:0,patch:0,initial:0};
   let baseline=null,remoteBaseline=null,sequence=0,remoteChain=Promise.resolve();
+  let deferredPresentationLesson=null;
   const inFlight=new Set();
   const log=(event,details={})=>diagnostics.log(event,{lessonId:binding()?.id,...details});
   const status=text=>{
@@ -76,6 +77,10 @@ export function setupCloudUI({currentDocument,load,setStatus,getBinding,setBindi
     },error=>{if(token!==sequence)return;ready=false;log('listener-error',{code:error.code,message:error.message});status(`Cloud: live connection failed — ${error.message}`);},{onMetrics:report=>{if(token===sequence)metrics(report);}});
   }
   async function applyRemote(doc,token){
+    if(document.body?.classList?.contains('audience-mode')){
+      deferredPresentationLesson={doc,token};
+      status('Cloud: lesson update will appear after presentation');return;
+    }
     log('remote-apply-start');applying=true;
     try{
       await load(doc,{remote:true});if(token!==sequence)return;
@@ -108,6 +113,7 @@ export function setupCloudUI({currentDocument,load,setStatus,getBinding,setBindi
     status('Cloud: edits in both browsers — choose which version to keep in Cloud lessons');log('sync-conflict');
   }
   function changed(doc,{force=false}={}){
+    if(document.body?.classList?.contains('audience-mode'))return;
     if(applying||deletingId||!userId||!doc?.lesson.pages.length)return;
     if(getBinding()?.uid===userId&&getBinding()?.deleted){showIdentity();return;}
     let value=binding();
@@ -177,6 +183,15 @@ export function setupCloudUI({currentDocument,load,setStatus,getBinding,setBindi
     remoteBaseline=documentDigest(conflict);clearConflict();ready=true;autosave.context(binding().id);log('conflict-keep-local');changed(currentDocument());
   });
   document.addEventListener('lesson:snapshot',event=>{log('local-snapshot');changed(event.detail);});
+  document.addEventListener('presentation:mode',event=>{
+    if(event.detail.presenting){autosave.clearTimer(autosave.timer);autosave.timer=null;return;}
+    // Let the annotation layer finish first; loading a lesson resets its canvas.
+    Promise.resolve().then(async()=>{
+      const deferred=deferredPresentationLesson;deferredPresentationLesson=null;
+      if(deferred&&deferred.token===sequence)await applyRemote(deferred.doc,deferred.token);
+      else changed(currentDocument());
+    }).catch(error=>status(`Cloud: could not apply update — ${error.message}`));
+  });
   window.addEventListener('online',()=>{browserOffline=false;log('browser-network',{online:true});if(userId)changed(currentDocument());});
   window.addEventListener('offline',()=>{browserOffline=true;log('browser-network',{online:false});if(userId)status('Cloud: offline — edits stay on this device');});
 }

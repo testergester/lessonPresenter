@@ -1,6 +1,6 @@
 import {initializeApp} from 'firebase/app';
 import {getAuth,GoogleAuthProvider,signInWithPopup,signOut,onAuthStateChanged} from 'firebase/auth';
-import {getDatabase,ref,get,update,serverTimestamp,onValue,query,orderByValue,startAt,endAt} from 'firebase/database';
+import {getDatabase,ref,get,update,serverTimestamp,onValue,query,orderByValue,startAt,endAt,runTransaction,onDisconnect} from 'firebase/database';
 import {firebaseConfig,OWNER_EMAIL} from './firebase-config.js';
 import {validateDocument} from './document.js';
 import {migrateCloudStorage} from './cloud-migration.js';
@@ -19,6 +19,37 @@ function owner(){const user=auth.currentUser;if(!user||!user.emailVerified||user
 export const watchAccount=callback=>onAuthStateChanged(auth,callback);
 export async function login(){const provider=new GoogleAuthProvider();provider.setCustomParameters({login_hint:OWNER_EMAIL});await signInWithPopup(auth,provider);try{owner();}catch(error){await signOut(auth);throw error;}}
 export const logout=()=>signOut(auth);
+const presentationPath=(user,id)=>`presentationSessions/${user.uid}/${requireCloudId(id)}`;
+export async function openPresentationSession(id,{baseDigest,title,pageCount,clientId}){
+  const user=owner(),path=presentationPath(user,id),sessionId=crypto.randomUUID();
+  const result=await runTransaction(ref(db,path+'/active'),current=>current?.baseDigest===baseDigest?current:{id:sessionId,baseDigest,clientId,startedAt:Date.now()});
+  const active=result.snapshot.val();
+  if(active.id===sessionId)await update(ref(db,path),{[`history/${sessionId}`]:{baseDigest,title:title.slice(0,200),pageCount,startedAt:serverTimestamp(),clientId}});
+  onDisconnect(ref(db,`${path}/sessions/${active.id}/drafts/${clientId}`)).remove().catch(()=>{});
+  return {...active,lessonId:id,uid:user.uid};
+}
+export function watchPresentationSession(session,receive,error){
+  const user=owner();if(session.uid!==user.uid)throw new Error('Presentation belongs to another account.');
+  return onValue(ref(db,`${presentationPath(user,session.lessonId)}/sessions/${requireCloudId(session.id)}`),snapshot=>receive(snapshot.val()||{}),error);
+}
+export function watchPresentationHistory(id,receive,error){return onValue(ref(db,presentationPath(owner(),id)+'/history'),snapshot=>receive(snapshot.val()||{}),error);}
+export async function writePresentationPage(session,index,patch){
+  const user=owner();if(session.uid!==user.uid)throw new Error('Presentation belongs to another account.');
+  if(!Number.isInteger(index)||index<0)throw new Error('Invalid slide.');
+  await update(ref(db,`${presentationPath(user,session.lessonId)}/sessions/${requireCloudId(session.id)}/pages/${index}/strokes`),patch);
+}
+export async function writePresentationDraft(session,clientId,draft){
+  const user=owner();if(session.uid!==user.uid)throw new Error('Presentation belongs to another account.');
+  await update(ref(db,`${presentationPath(user,session.lessonId)}/sessions/${requireCloudId(session.id)}/drafts`),{[requireCloudId(clientId)]:draft?JSON.stringify(draft):null});
+}
+export async function finishPresentationSession(session,clientId){
+  const user=owner();if(session.uid!==user.uid)return;
+  const path=presentationPath(user,session.lessonId);
+  await writePresentationDraft(session,clientId,null);
+  if(session.clientId!==clientId)return;
+  await update(ref(db,path+'/history/'+session.id),{endedAt:serverTimestamp()});
+  await runTransaction(ref(db,path+'/active'),current=>current?.id===session.id?null:current);
+}
 const lessonPath=(uid,id)=>`cloudLessons/${uid}/lessons/${requireCloudId(id)}`;
 function ensureStorage(user){
   if(!storageMigrations.has(user.uid)){

@@ -1,5 +1,6 @@
 import {StaticCanvas} from 'fabric';
 import {StudioPanels} from './src/studio-panels.js';
+import {installPresentationTools} from './src/presentation-tools.js';
 import './src/video.js';
 const smallScreen=matchMedia('(max-width:680px)');
 const panels=new StudioPanels(smallScreen.matches);
@@ -281,3 +282,4 @@ toolbar.addEventListener('pointerover',showTooltip);toolbar.addEventListener('fo
 cloudIcon.addEventListener('pointerover',showTooltip);cloudIcon.addEventListener('focusin',showTooltip);cloudIcon.addEventListener('pointerout',event=>{if(!cloudIcon.contains(event.relatedTarget))hideTooltip();});cloudIcon.addEventListener('focusout',hideTooltip);cloudIcon.addEventListener('click',hideTooltip);
 document.addEventListener('keydown',event=>{if(event.key==='Escape')hideTooltip();});
 engine=await import('./main.js');
+installPresentationTools();

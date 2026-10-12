@@ -153,6 +153,13 @@ test('student view locks objects while permitting annotations on the shared boar
   a.run('setAnnotation(false);');assert.equal(mode.drawing,false);
   assert.equal(a.context.document.body.classList.contains('preview-mode'),true);
 });
+test('presentation pen draws while lesson objects remain locked',()=>{
+  const a=app();let mode;
+  a.context.fakeEditor={setMode:value=>mode=value,setPen(){},selected(){return null;}};
+  a.run("boardEditor=fakeEditor;document.body.classList.toggle('audience-mode',true);setAnnotation(true);");
+  assert.equal(mode.readonly,true);assert.equal(mode.drawing,true);
+  a.run('setAnnotation(false);');assert.equal(mode.drawing,false);assert.equal(mode.readonly,true);
+});
 test('reordering keeps the active slide, answers, notes, responses and canvas order together',()=>{
   const a=app();let canvasOrder;
   a.context.fakeEditor={reorderSlides:order=>canvasOrder=Array.from(order)};

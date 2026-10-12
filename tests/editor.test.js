@@ -64,6 +64,20 @@ test('workspace zoom changes only rendering, clamps limits and rejects invalid v
   SlideEditor.prototype.setZoom.call(editor,NaN);assert.equal(editor.zoom,1);assert.equal(editor.resizeCalls,4);
   assert.deepEqual(object,{left:160,top:80,scaleX:1,scaleY:1});
 });
+test('Studio presentation fits the full viewport without reserving space for navigation',()=>{
+  const previous={document:globalThis.document,getComputedStyle:globalThis.getComputedStyle};
+  const parent={clientWidth:1414,clientHeight:827};let size;
+  const editor={zoom:3,host:{parentElement:parent,style:{}},canvas:{setDimensions:value=>size=value,setViewportTransform(){}},syncMedia(){}};
+  try{
+    globalThis.document={body:{dataset:{layout:'studio'},classList:{contains:name=>name==='audience-mode'}}};
+    globalThis.getComputedStyle=()=>({paddingTop:'0',paddingBottom:'0',paddingLeft:'0',paddingRight:'0'});
+    SlideEditor.prototype.resize.call(editor);
+    assert.equal(size.width,1414);assert.equal(size.height,795);
+    assert.equal(editor.host.style.width,'1414px');
+  }finally{
+    for(const [name,value] of Object.entries(previous)){if(value===undefined)delete globalThis[name];else globalThis[name]=value;}
+  }
+});
 
 test('URL image insertion requests CORS, keeps its source and ignores a stale slide',async()=>{
   const {StyledImage}=await import('../src/image.js');const original=StyledImage.fromURL;let options,source,added;

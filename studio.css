@@ -122,7 +122,7 @@ body.studio .app-shell {display:grid;grid-template-columns:var(--studio-slide-wi
 
 .studio.audience-mode .studio-toolbar,.studio.audience-mode .studio-footer {display:none;}
 .studio.audience-mode .app-shell {height:100dvh;}
-.studio.audience-mode .studio-viewport {background:#111;padding:12px;}
+.studio.audience-mode .studio-viewport {background:transparent;padding:0;}
 @media(max-width:1000px){body.studio {--studio-slide-width:160px;--studio-properties-width:245px;}.studio .save-indicator,.studio-original {display:none;}.studio-viewport {padding:16px;}.studio #status {left:175px;max-width:calc(100% - 435px);}}
 @media(max-width:680px){.studio .brand>span:last-child {display:none;}/* Keep document controls above a two-row action grid on narrow screens. */
 .studio .app-header {display:grid;grid-template-columns:28px minmax(0,1fr);grid-template-rows:32px 72px;padding:6px 10px;gap:4px 8px;align-content:start;}
@@ -298,3 +298,40 @@ body.studio.audience-mode .workspace {grid-column:1;grid-row:1;}
 .studio-toolbar-tooltip {position:fixed;z-index:110;background:#263447;color:white;padding:5px 8px;border-radius:4px;font-size:11px;pointer-events:none;max-width:min(360px,calc(100vw - 16px));box-sizing:border-box;overflow-wrap:anywhere;}
 .studio .stage-action.stage-delete {margin-left:0;flex-shrink:0;padding:2px 4px;}
 .studio .stage-tools {padding-left:6px;}
+
+/* Full-screen slides with navigation revealed at the top edge. */
+body.studio.audience-mode .workspace {padding:0;}
+body.studio.audience-mode .workspace-grid {display:flex;margin:0;}
+body.studio.audience-mode .studio-viewport {padding:0;background:transparent;scrollbar-gutter:auto;}
+body.studio.audience-mode #teacherStage {box-shadow:none;border-radius:0;}
+body.studio.audience-mode .presentation-bar {z-index:80;transform:translateY(-100%);transition:transform .18s ease;box-shadow:0 3px 16px #17233a20;}
+body.studio.audience-mode.presentation-navigation-visible .presentation-bar,
+body.studio.audience-mode .presentation-bar:focus-within {transform:translateY(0);}
+.presentation-edge {position:fixed;inset:0 0 auto;z-index:79;height:12px;min-height:0;width:100%;padding:0;border:0;background:transparent;}
+.presentation-edge:focus-visible {background:#3866e530;outline:2px solid #3866e5;outline-offset:-2px;}
+.presentation-tools {position:fixed;z-index:70;bottom:max(16px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);max-width:calc(100vw - 24px);padding:6px;background:#fffefef2;border:1px solid #dce2eb;border-radius:12px;box-shadow:0 4px 24px #17233a26;color:#263447;}
+.presentation-tool-row {display:flex;align-items:center;gap:4px;}
+.presentation-tools button {display:flex;align-items:center;justify-content:center;gap:6px;min-height:38px;min-width:38px;padding:7px 10px;border:0;border-radius:7px;background:transparent;font:600 13px Arial,sans-serif;color:inherit;white-space:nowrap;}
+.presentation-tools button:hover,.presentation-tools button[aria-pressed=true],.presentation-tools button[aria-expanded=true] {background:#edf2ff;color:#315fcd;}
+.presentation-tools button:focus-visible {outline:2px solid #3866e5;outline-offset:-2px;}
+.presentation-tools [data-time] {font-variant-numeric:tabular-nums;}
+.presentation-timer-panel {position:absolute;bottom:calc(100% + 8px);right:0;width:240px;max-width:calc(100vw - 24px);padding:14px;border:1px solid #dce2eb;border-radius:10px;background:white;box-shadow:0 4px 24px #17233a26;}
+.presentation-timer-panel label {display:flex;align-items:center;gap:12px;font-size:13px;}
+.presentation-timer-panel input {width:90px;margin:0;}
+.presentation-timer-panel [data-state] {display:block;margin:12px 0;font-size:11px;color:#667087;}
+.presentation-timer-panel>div {display:flex;gap:6px;}
+.presentation-timer-panel [data-tool=start] {background:#3866e5;color:white;}
+.presentation-laser {position:fixed;z-index:65;width:14px;height:14px;border:2px solid white;border-radius:50%;background:#ef3340;box-shadow:0 0 0 6px #ef334033,0 0 20px #ef3340aa;transform:translate(-50%,-50%);pointer-events:none;}
+body.presentation-laser-active #teacherStage {cursor:crosshair;}
+@media(prefers-reduced-motion:reduce){body.studio.audience-mode .presentation-bar {transition:none;}}
+@media(max-width:480px){.presentation-tools button {padding:7px;gap:4px;}.presentation-tools {bottom:10px;}.studio .presentation-bar {padding:10px;flex-wrap:wrap;}.studio .presentation-bar>div {gap:6px;}}
+@media print{.presentation-tools,.presentation-edge,.presentation-laser {display:none!important;}}
+.presentation-sync-status {display:block;max-width:340px;padding:2px 7px 4px;font-size:10px;text-align:center;color:#667087;}
+.presentation-session-review {padding:14px;border:1px solid var(--line);border-radius:6px;background:white;margin-top:14px;}
+.presentation-session-review h3 {font-size:13px;margin:0 0 8px;}
+.presentation-session-review p {font-size:11px;line-height:1.5;}
+.presentation-session-review label {font-size:11px;}
+.presentation-session-review select {width:100%;margin:6px 0 10px;}
+.presentation-session-review button {padding:8px 12px;border:1px solid var(--line);border-radius:5px;background:#eef2fb;color:#315fcd;font-size:12px;}
+.presentation-live-drafts {position:absolute;inset:0;width:100%;height:100%;z-index:4;pointer-events:none;}
+@media print{.presentation-live-drafts,.presentation-session-review {display:none!important;}}

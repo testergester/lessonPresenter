@@ -195,6 +195,88 @@
           ".validate": "newData.val() === true"
         }
       }
+    },
+    "presentationSessions": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid && auth.token.email === 'mea.gdrive3@gmail.com' && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com'",
+        ".write": "auth != null && auth.uid === $uid && auth.token.email === 'mea.gdrive3@gmail.com' && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com'",
+        "$lesson": {
+          ".validate": "$lesson.matches(/^[A-Za-z0-9_-]{1,128}$/)",
+          "active": {
+            ".validate": "newData.hasChildren(['id','baseDigest','clientId','startedAt'])",
+            "id": {
+              ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]{1,128}$/)"
+            },
+            "baseDigest": {
+              ".validate": "newData.isString() && newData.val().length <= 100"
+            },
+            "clientId": {
+              ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]{1,128}$/)"
+            },
+            "startedAt": {
+              ".validate": "newData.isNumber() && newData.val() <= now + 60000"
+            },
+            "$other": {
+              ".validate": false
+            }
+          },
+          "history": {
+            "$session": {
+              ".validate": "$session.matches(/^[A-Za-z0-9_-]{1,128}$/) && newData.hasChildren(['baseDigest','title','pageCount','startedAt','clientId'])",
+              "baseDigest": {
+                ".validate": "newData.isString() && newData.val().length <= 100"
+              },
+              "title": {
+                ".validate": "newData.isString() && newData.val().length <= 200"
+              },
+              "pageCount": {
+                ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() > 0 && newData.val() <= 500"
+              },
+              "startedAt": {
+                ".validate": "newData.isNumber() && newData.val() <= now + 60000"
+              },
+              "endedAt": {
+                ".validate": "newData.isNumber() && newData.val() <= now + 60000"
+              },
+              "clientId": {
+                ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]{1,128}$/)"
+              },
+              "$other": {
+                ".validate": false
+              }
+            }
+          },
+          "sessions": {
+            "$session": {
+              ".validate": "$session.matches(/^[A-Za-z0-9_-]{1,128}$/)",
+              "pages": {
+                "$page": {
+                  ".validate": "$page.matches(/^[0-9]{1,3}$/)",
+                  "strokes": {
+                    "$stroke": {
+                      ".validate": "$stroke.matches(/^[A-Za-z0-9_-]{1,128}$/) && newData.isString() && newData.val().length <= 65536"
+                    }
+                  },
+                  "$other": {
+                    ".validate": false
+                  }
+                }
+              },
+              "drafts": {
+                "$client": {
+                  ".validate": "$client.matches(/^[A-Za-z0-9_-]{1,128}$/) && newData.isString() && newData.val().length <= 32768"
+                }
+              },
+              "$other": {
+                ".validate": false
+              }
+            }
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
     }
   }
 }
