@@ -10,7 +10,7 @@ import {imageURL} from './image-url.js';
 const descendants = objects => objects.flatMap(object=>[object,...descendants(object.getObjects?.()||[])]);
 const serializedDescendants = objects => objects.flatMap(object=>[object,...serializedDescendants(object.objects||[])]);
 
-const CUSTOM = ['lpId','lpRole','lpAnswerIndex','lpVideoId','lpAnnotation','lpSessionAnnotation','lpLiveAnnotation','lpLabel','lpSticker','lpImageRadius'];
+const CUSTOM = ['lpId','lpRole','lpAnswerIndex','lpVideoId','lpAnnotation','lpSessionAnnotation','lpLiveAnnotation','lpAnnotationKind','lpLabel','lpSticker','lpImageRadius'];
 FabricObject.customProperties = CUSTOM;
 FabricObject.ownDefaults.originX='left';
 FabricObject.ownDefaults.originY='top';

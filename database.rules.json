@@ -256,8 +256,11 @@
               "type": {".validate": "newData.val() === 'command'"},
               "at": {".validate": "newData.isNumber() && newData.val() <= now + 60000"},
               "value": {
-                ".validate": "newData.hasChildren(['action'])",
-                "action": {".validate": "newData.isString() && newData.val().matches(/^(next|previous|slide|blank|restart|hide|reveal|stroke|clear)$/)"},
+                ".validate": "newData.hasChildren(['action']) && (newData.child('action').val() !== 'annotation' || (newData.hasChildren(['operation','index','id']) && (newData.child('operation').val() === 'delete' || newData.hasChild('object'))))",
+                "action": {".validate": "newData.isString() && newData.val().matches(/^(next|previous|slide|blank|restart|hide|reveal|stroke|clear|annotation)$/)"},
+                "operation": {".validate": "newData.isString() && newData.val().matches(/^(create|update|delete)$/)"},
+                "id": {".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]{1,128}$/)"},
+                "object": {".validate": "newData.isString() && newData.val().length <= 65536"},
                 "index": {".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() < 300"},
                 "color": {".validate": "newData.isString() && newData.val().matches(/^#[a-fA-F0-9]{6}$/)"},
                 "width": {".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 20"},

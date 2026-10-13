@@ -43,7 +43,8 @@ async function render(){
   if(rendering){needsRender=true;return;}if(!doc||!state||ended)return;
   rendering=true;
   try{
-    const current=doc,control=normalizeState(current,state),scene=JSON.stringify(current.slides[control.index]),changed=sceneKey!==scene||editor.index!==control.index||lastEpoch!==control.epoch;
+    const control=normalizeState(doc,state),current=params.has('inkOverlay')?{...doc,slides:doc.slides.map(slide=>({...slide,objects:slide.objects.filter(object=>!object.lpLiveAnnotation)}))}:doc;
+    const scene=JSON.stringify(current.slides[control.index]),changed=sceneKey!==scene||editor.index!==control.index||lastEpoch!==control.epoch;
     $('projectorBlank').hidden=params.has('monitor')||!control.blank;
     if(changed){
       editor.setLesson(current.slides);await editor.show(control.index,control.reveal);sceneKey=scene;

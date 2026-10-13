@@ -5,6 +5,7 @@ import {createRequire} from 'node:module';
 import vm from 'node:vm';
 import {encodeIncremental,decodeIncremental,incrementalPatch} from '../src/cloud-incremental.js';
 import {LiveLink} from '../src/live-link.js';
+import {annotationCommand,annotationShape,applyAnnotationCommand} from '../src/live-annotations.js';
 
 test('Firebase live room: isolated edits, remote commands, ink and laser; owner permissions and session cleanup',{skip:!process.env.FIREBASE_DATABASE_EMULATOR_HOST},async()=>{
   const require=createRequire(process.env.LP_FIREBASE_TEST_TOOLS+'/package.json');
@@ -40,6 +41,19 @@ test('Firebase live room: isolated edits, remote commands, ink and laser; owner 
     assert.ok(projectorMessages.some(m=>m.type==='laser'&&m.value.x===.25));
     peer.send('draft',{client:peer.id,index:0,points:[[10,10],[20,20]],color:'#e11d48',width:4,at:Date.now()});await wait(()=>hostMessages.some(m=>m.type==='draft'&&!m.value.clear));
     peer.send('command',{action:'stroke',index:0,color:'#e11d48',width:4,points:[[0,0],[1,1]]});await wait(()=>hostMessages.some(m=>m.type==='command'&&m.value.action==='stroke'));
+    let live=changed;
+    for(const [operation,object] of [['create',annotationShape('square',{x:100,y:100},{x:300,y:300},'#e11d48',4,'remote-mark')],['update',{...annotationShape('square',{x:100,y:100},{x:300,y:300},'#2563eb',6,'remote-mark'),left:350,scaleX:1.5,scaleY:1.5}],['delete','remote-mark']]){
+      const request=annotationCommand(operation,0,object);peer.send('command',request);
+      await wait(()=>hostMessages.some(m=>m.type==='command'&&m.value.operation===operation));
+      live=applyAnnotationCommand(live,hostMessages.find(m=>m.type==='command'&&m.value.operation===operation).value);assert.ok(live);
+      hostLink.send('document',live);
+      await wait(()=>peerMessages.some(m=>m.type==='document'&&JSON.stringify(m.value)===JSON.stringify(live)));
+      assert.ok(projectorMessages.some(m=>m.type==='document'&&JSON.stringify(m.value)===JSON.stringify(live)));
+    }
+    for(const patch of [{operation:'replace'},{index:300},{object:'x'.repeat(65537)},{id:'unsafe/id'}]){
+      const message=peer.message('command',{...annotationCommand('create',0,annotationShape('circle',{x:1,y:1},{x:30,y:30},'#e11d48',4,'invalid-mark')),...patch});
+      await assertFails(sdk.set(sdk.ref(b,root+'/commands/'+message.id),message));
+    }
     hostLink.send('state',{...state,blank:true});await wait(()=>peerMessages.some(m=>m.type==='state'&&m.value.blank));
     await env.withSecurityRulesDisabled(async context=>assert.equal((await sdk.get(sdk.ref(context.database(),source+'/json'))).val(),JSON.stringify(doc)));
     await assertFails(sdk.get(sdk.ref(env.unauthenticatedContext().database(),root)));

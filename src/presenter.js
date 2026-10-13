@@ -2,6 +2,7 @@ import {LiveLink} from './live-link.js';
 import {slideState,normalizeState,presentationCommand,remoteStroke,validRoomId} from './live-protocol.js';
 import {documentDigest} from './cloud-sync.js';
 import {animationBatch} from './animations.js';
+import {applyAnnotationCommand} from './live-annotations.js';
 import {watchAccount} from './cloud.js';
 import {OWNER_EMAIL} from './firebase-config.js';
 import {connectLiveRoom,watchLiveRooms} from './live-cloud.js';
@@ -113,7 +114,13 @@ export function setupPresenter(api){
     showState();
   }
   function changed(){if(room&&!applying&&!frame)frame=requestAnimationFrame(publish);}
-  async function command(value){
+  let commandQueue=Promise.resolve();
+  function command(value){
+    const session=room;
+    commandQueue=commandQueue.then(()=>{if(room===session)return executeCommand(value);}).catch(error=>{applying=false;api.status(`Live command failed: ${error.message}`);});
+    return commandQueue;
+  }
+  async function executeCommand(value){
     if(!room||!doc||!hasDocument)return;
     if(!applying)publish();
     if(!host){link.send('command',value);return;}
@@ -122,6 +129,11 @@ export function setupPresenter(api){
       const stroke=remoteStroke(value);if(!stroke||!doc.slides[value.index])return;
       const next=api.document();next.slides[value.index].objects.push(stroke);doc=next;digest=documentDigest(doc);
       applying=true;await api.load(doc,state.index);api.control(state);applying=false;link.send('document',doc);return;
+    }
+    if(value.action==='annotation'){
+      const next=applyAnnotationCommand(api.document(),value);if(!next)return;
+      doc=next;digest=documentDigest(doc);applying=true;
+      await api.load(doc,state.index);api.control(state);applying=false;link.send('document',doc);return;
     }
     if(value.action==='clear'){
       const next=api.document();next.slides[state.index].objects=next.slides[state.index].objects.filter(object=>!object.lpLiveAnnotation);
