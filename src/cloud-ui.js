@@ -11,6 +11,7 @@ export function setupCloudUI({currentDocument,load,setStatus,getBinding,setBindi
   let measurements={saves:0,whole:0,patch:0,initial:0};
   let baseline=null,remoteBaseline=null,sequence=0,remoteChain=Promise.resolve();
   let deferredPresentationLesson=null;
+  let presenterActive=document.body?.classList?.contains('presenter-active')||false;
   const inFlight=new Set();
   const log=(event,details={})=>diagnostics.log(event,{lessonId:binding()?.id,...details});
   const status=text=>{
@@ -77,7 +78,7 @@ export function setupCloudUI({currentDocument,load,setStatus,getBinding,setBindi
     },error=>{if(token!==sequence)return;ready=false;log('listener-error',{code:error.code,message:error.message});status(`Cloud: live connection failed — ${error.message}`);},{onMetrics:report=>{if(token===sequence)metrics(report);}});
   }
   async function applyRemote(doc,token){
-    if(document.body?.classList?.contains('audience-mode')){
+    if(presenterActive||document.body?.classList?.contains('audience-mode')){
       deferredPresentationLesson={doc,token};
       status('Cloud: lesson update will appear after presentation');return;
     }
@@ -89,6 +90,7 @@ export function setupCloudUI({currentDocument,load,setStatus,getBinding,setBindi
     }finally{applying=false;}
   }
   async function receive(doc,token){
+    if(presenterActive){if(doc)deferredPresentationLesson={doc,token};return;}
     log('remote-received',{phase:doc?'document':'missing'});
     if(!doc){
       if(baseline||!binding()?.creating){
@@ -113,6 +115,7 @@ export function setupCloudUI({currentDocument,load,setStatus,getBinding,setBindi
     status('Cloud: edits in both browsers — choose which version to keep in Cloud lessons');log('sync-conflict');
   }
   function changed(doc,{force=false}={}){
+    if(presenterActive)return;
     if(document.body?.classList?.contains('audience-mode'))return;
     if(applying||deletingId||!userId||!doc?.lesson.pages.length)return;
     if(getBinding()?.uid===userId&&getBinding()?.deleted){showIdentity();return;}
@@ -126,6 +129,7 @@ export function setupCloudUI({currentDocument,load,setStatus,getBinding,setBindi
     autosave.request(doc);
   }
   async function openCloudLesson(lesson){
+    if(presenterActive){setStatus('End the live presentation before opening another saved lesson.');return;}
     const owner=userId,doc=await getCloudLesson(lesson.id);if(owner!==userId)return;
     log('lesson-open',{lessonId:lesson.id});applying=true;
     try{
@@ -183,6 +187,16 @@ export function setupCloudUI({currentDocument,load,setStatus,getBinding,setBindi
     remoteBaseline=documentDigest(conflict);clearConflict();ready=true;autosave.context(binding().id);log('conflict-keep-local');changed(currentDocument());
   });
   document.addEventListener('lesson:snapshot',event=>{log('local-snapshot');changed(event.detail);});
+  document.addEventListener('presenter:mode',event=>{
+    presenterActive=event.detail.active;
+    autosave.clearTimer(autosave.timer);autosave.timer=null;
+    if(!presenterActive){
+      const deferred=deferredPresentationLesson;deferredPresentationLesson=null;
+      if(deferred&&deferred.token===sequence)applyRemote(deferred.doc,deferred.token).catch(error=>status(error.message));
+      else changed(currentDocument());
+    }
+    status(presenterActive?'Cloud: saved lesson paused · live session edits only':'Cloud: saved lesson restored');
+  });
   document.addEventListener('presentation:mode',event=>{
     if(event.detail.presenting){autosave.clearTimer(autosave.timer);autosave.timer=null;return;}
     // Let the annotation layer finish first; loading a lesson resets its canvas.

@@ -196,6 +196,88 @@
         }
       }
     },
+    "presentationRoomIndex": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid && auth.token.email === 'mea.gdrive3@gmail.com' && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com'",
+        ".write": "auth != null && auth.uid === $uid && auth.token.email === 'mea.gdrive3@gmail.com' && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com'",
+        "$room": {
+          ".validate": "$room.matches(/^[A-Za-z0-9_-]{1,128}$/) && newData.hasChildren(['title','startedAt','ended'])",
+          "title": {".validate": "newData.isString() && newData.val().length <= 200"},
+          "startedAt": {".validate": "newData.isNumber() && newData.val() <= now + 60000"},
+          "ended": {".validate": "newData.isBoolean()"},
+          "hostOnline": {".validate": "newData.isBoolean()"},
+          "$other": {".validate": false}
+        }
+      }
+    },
+    "presentationRooms": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid && auth.token.email === 'mea.gdrive3@gmail.com' && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com'",
+        ".write": "auth != null && auth.uid === $uid && auth.token.email === 'mea.gdrive3@gmail.com' && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com'",
+        "$room": {
+          ".validate": "$room.matches(/^[A-Za-z0-9_-]{1,128}$/)",
+          "meta": {
+            ".validate": "newData.hasChildren(['title','startedAt','ended','hostOnline'])",
+            "title": {".validate": "newData.isString() && newData.val().length <= 200"},
+            "startedAt": {".validate": "newData.isNumber() && newData.val() <= now + 60000"},
+            "ended": {".validate": "newData.isBoolean()"},
+            "hostOnline": {".validate": "newData.isBoolean()"},
+            "$other": {".validate": false}
+          },
+          "document": {
+            "entries": {"$field": {".validate": "newData.isString() && newData.val().length <= 2097152"}},
+            "assets": {"$hash": {".validate": "$hash.matches(/^[a-f0-9]{64}$/) && newData.isString() && newData.val().length <= 2097152 && newData.val().matches(/^data:image\\/(png|jpeg|webp|gif|svg\\+xml);base64,[A-Za-z0-9+\\/=\\r\\n]+$/)"}},
+            "$other": {".validate": false}
+          },
+          "state": {".validate": "newData.isString() && newData.val().length <= 1024"},
+          "drafts": {"$client": {".validate": "$client.matches(/^[A-Za-z0-9_-]{1,128}$/) && newData.isString() && newData.val().length <= 32768"}},
+          "lasers": {
+            "$client": {
+              ".validate": "$client.matches(/^[A-Za-z0-9_-]{1,128}$/) && newData.hasChildren(['sender','value'])",
+              "sender": {".validate": "newData.isString() && newData.val() === $client"},
+              "value": {
+                ".validate": "newData.hasChildren(['x','y','visible','at'])",
+                "x": {".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1"},
+                "y": {".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1"},
+                "visible": {".validate": "newData.isBoolean()"},
+                "at": {".validate": "newData.isNumber() && newData.val() <= now + 60000"},
+                "$other": {".validate": false}
+              },
+              "$other": {".validate": false}
+            }
+          },
+          "commands": {
+            "$command": {
+              ".validate": "$command.matches(/^[A-Za-z0-9_-]{1,128}$/) && newData.hasChildren(['room','id','sender','type','value','at'])",
+              "room": {".validate": "newData.val() === $room"},
+              "id": {".validate": "newData.val() === $command"},
+              "sender": {".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]{1,128}$/)"},
+              "host": {".validate": "newData.isBoolean()"},
+              "type": {".validate": "newData.val() === 'command'"},
+              "at": {".validate": "newData.isNumber() && newData.val() <= now + 60000"},
+              "value": {
+                ".validate": "newData.hasChildren(['action'])",
+                "action": {".validate": "newData.isString() && newData.val().matches(/^(next|previous|slide|blank|restart|hide|reveal|stroke|clear)$/)"},
+                "index": {".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() < 300"},
+                "color": {".validate": "newData.isString() && newData.val().matches(/^#[a-fA-F0-9]{6}$/)"},
+                "width": {".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 20"},
+                "points": {
+                  "$point": {
+                    ".validate": "$point.matches(/^[0-9]{1,3}$/) && newData.hasChildren(['0','1'])",
+                    "0": {".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1"},
+                    "1": {".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1"},
+                    "$other": {".validate": false}
+                  }
+                },
+                "$other": {".validate": false}
+              },
+              "$other": {".validate": false}
+            }
+          },
+          "$other": {".validate": false}
+        }
+      }
+    },
     "presentationSessions": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid && auth.token.email === 'mea.gdrive3@gmail.com' && auth.token.email_verified === true && auth.token.firebase.sign_in_provider === 'google.com'",

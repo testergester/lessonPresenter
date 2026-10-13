@@ -10,7 +10,7 @@ import {imageURL} from './image-url.js';
 const descendants = objects => objects.flatMap(object=>[object,...descendants(object.getObjects?.()||[])]);
 const serializedDescendants = objects => objects.flatMap(object=>[object,...serializedDescendants(object.objects||[])]);
 
-const CUSTOM = ['lpId','lpRole','lpAnswerIndex','lpVideoId','lpAnnotation','lpSessionAnnotation','lpLabel','lpSticker','lpImageRadius'];
+const CUSTOM = ['lpId','lpRole','lpAnswerIndex','lpVideoId','lpAnnotation','lpSessionAnnotation','lpLiveAnnotation','lpLabel','lpSticker','lpImageRadius'];
 FabricObject.customProperties = CUSTOM;
 FabricObject.ownDefaults.originX='left';
 FabricObject.ownDefaults.originY='top';
@@ -64,8 +64,8 @@ export function stageToSlide(stage) {
 }
 
 export class SlideEditor {
-  constructor(host, {onChange,onSelection,onHistory,onError,onTitleChange,onPlayback}) {
-    this.host=host;this.callbacks={onChange,onSelection,onHistory,onError,onTitleChange,onPlayback};this.zoom=1;
+  constructor(host, {onChange,onSelection,onHistory,onError,onTitleChange,onPlayback,onPresentationChange,onPresentationDraft,onSlideReady,onLiveChange}) {
+    this.host=host;this.callbacks={onChange,onSelection,onHistory,onError,onTitleChange,onPlayback,onPresentationChange,onPresentationDraft,onSlideReady,onLiveChange};this.zoom=1;
     this.slides=[];this.histories=[];this.index=-1;this.ready=false;this.loading=false;this.readonly=false;this.preview=false;this.revealCount=0;this.token=0;
     this.queue=Promise.resolve();
     host.classList.add('fabric-board');
@@ -87,20 +87,20 @@ export class SlideEditor {
       if(object?.lpVideoId){event.stopImmediatePropagation();this.playVideo(object.lpId);}
     },true);
     ['object:modified','text:editing:exited','path:created'].forEach(event=>this.canvas.on(event,()=>{
-      if(event==='path:created')this.canvas.getObjects().filter(o=>o.type==='path'&&!o.lpId).forEach(o=>{o.lpId=uid();o.lpAnnotation=true;if(this.presentationActive)o.lpSessionAnnotation=true;});
+      if(event==='path:created')this.canvas.getObjects().filter(o=>o.type==='path'&&!o.lpId).forEach(o=>{o.lpId=uid();o.lpAnnotation=true;if(this.presentationActive)o.lpSessionAnnotation=true;if(this.liveSession)o.lpLiveAnnotation=true;});
       if(this.readonly&&event==='path:created')this.recordAnnotations();
       this.commit();
-      if(event==='path:created'&&this.presentationActive)this.callbacks.onPresentationDraft?.(null);
+      if(event==='path:created'&&(this.presentationActive||this.liveSession))this.callbacks.onPresentationDraft?.(null);
     }));
     let draft=null;
     const draftPoint=event=>{const point=this.canvas.getScenePoint(event.e);return [point.x,point.y];};
     this.canvas.on('mouse:down',event=>{
-      if(!this.presentationActive||!this.drawing||!this.ready)return;
+      if(!(this.presentationActive||this.liveSession)||!this.drawing||!this.ready)return;
       draft={index:this.index,color:this.canvas.freeDrawingBrush.color,width:this.canvas.freeDrawingBrush.width,points:[draftPoint(event)]};
       this.callbacks.onPresentationDraft?.(structuredClone(draft));
     });
     this.canvas.on('mouse:move',event=>{
-      if(!draft||!this.presentationActive||!this.drawing)return;
+      if(!draft||!(this.presentationActive||this.liveSession)||!this.drawing)return;
       draft.points.push(draftPoint(event));
       // Bound the live preview; the completed Fabric path retains full detail.
       if(draft.points.length>300)draft.points=draft.points.filter((_,i)=>i%2===0);
@@ -109,6 +109,7 @@ export class SlideEditor {
     this.canvas.on('mouse:up',()=>{draft=null;this.callbacks.onPresentationDraft?.(null);});
     ['selection:created','selection:updated','selection:cleared'].forEach(event=>this.canvas.on(event,()=>this.selectionChanged()));
     ['object:moving','object:scaling','object:rotating'].forEach(event=>this.canvas.on(event,()=>this.syncMedia()));
+    ['object:moving','object:scaling','object:rotating','text:changed'].forEach(event=>this.canvas.on(event,()=>{if(this.liveSession)this.callbacks.onLiveChange?.();}));
     this.canvas.on('object:moving',({target})=>{
       if(!target)return;
       if(Math.abs(target.left+target.getScaledWidth()/2-W/2)<8)target.set('left',W/2-target.getScaledWidth()/2);

@@ -16,6 +16,7 @@ const pendingWrites=new Map();
 const persistentCache=createCloudCache(firebaseConfig.databaseURL||firebaseConfig.projectId);
 const cacheKey=(uid,id)=>uid+'/'+id;
 function owner(){const user=auth.currentUser;if(!user||!user.emailVerified||user.email!==OWNER_EMAIL)throw new Error('Sign in with the project owner’s Google account.');return user;}
+export const liveDatabase=()=>({db,user:owner()});
 export const watchAccount=callback=>onAuthStateChanged(auth,callback);
 export async function login(){const provider=new GoogleAuthProvider();provider.setCustomParameters({login_hint:OWNER_EMAIL});await signInWithPopup(auth,provider);try{owner();}catch(error){await signOut(auth);throw error;}}
 export const logout=()=>signOut(auth);

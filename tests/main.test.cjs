@@ -58,6 +58,11 @@ test('answer reveals stay out of saved documents and revealing does not queue a 
  assert.equal(a.run('revealedAnswerCountByPage[0]'),1);assert.equal(a.run('saves'),0);
  assert.equal(a.run('currentDocument().revealedAnswerCountByPage[0]'),0);
 });
+test('presenter edits bypass both local lesson persistence and cloud lesson snapshot events',async()=>{
+ const a=app();a.run(`lesson={pages:[{title:'Live',questions:[]}]};liveSessionActive=true;let liveChanges=0;let writes=0;notifyStudio=()=>{};presenter={changed:()=>liveChanges++};saveSession=async()=>writes++;boardEditor={documentSlides:()=>[{objects:[]}]};`);
+ await a.run('persistSnapshot()');a.run('queueSnapshot()');
+ assert.equal(a.run('writes'),0);assert.equal(a.run('liveChanges'),2);assert.equal(a.node('saveIndicator').textContent,'');
+});
 test('presentation arrows reveal and hide one answer before navigating, including boundary slides',()=>{
  const a=app();a.run(`lesson={pages:[{questions:[{prompt:'Q',answer:'A'}]}]};revealedAnswerCountByPage=[0];currentPageIndex=0;
    document.body.classList.toggle('audience-mode',true);boardEditor={nextAnimation:()=>false,setReveal:()=>{}};let saves=0,moves=0;persistSnapshot=()=>{saves++;};navigateStage=direction=>{moves+=direction;};syncAnswers();`);
