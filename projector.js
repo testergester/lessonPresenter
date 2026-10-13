@@ -6,6 +6,8 @@ import {normalizeState,validRoomId} from './src/live-protocol.js';
 import {connectLiveRoom} from './src/live-cloud.js';
 import {watchAccount,login} from './src/cloud.js';
 import {OWNER_EMAIL} from './src/firebase-config.js';
+import {installProjectorTools} from './src/projector-tools.js';
+import {annotationCommand,applyAnnotationCommand} from './src/live-annotations.js';
 import './styles.css';
 import './src/presenter.css';
 
@@ -30,7 +32,45 @@ function receiveDraft(value){
   drafts.set(value.client,value);renderDrafts();
 }
 const draftExpiry=setInterval(renderDrafts,750);
-const editor=new SlideEditor($('projectorStage'),{onChange:()=>{},onSelection:()=>{},onHistory:()=>{},onError:error=>{$('projectorStatus').textContent=error;},onPlayback:()=>{}});
+let draftTimer=null,lastDraft=0,laserSendTimer=null,lastLaserSend=0,drawingGesture=false;
+const ownedMarks=new Map(),interactive=!params.has('preview')&&!params.has('monitor')&&!params.has('inkOverlay');
+const tools=interactive?installProjectorTools({onMode:mode=>{editor.setMode({readonly:true,drawing:mode==='pen'});if(mode!=='laser')sendLaser(null);},onCommand:command=>{
+  if(!doc||!state||ended)return;
+  link?.send('command',command);
+  if(command.action==='clear'){doc=structuredClone(doc);doc.slides[state.index].objects=doc.slides[state.index].objects.filter(object=>!object.lpLiveAnnotation);render();}
+},onUndo:()=>{
+  const ids=ownedMarks.get(state?.index)||[];
+  while(ids.length){const id=ids.pop();if(doc.slides[state.index].objects.some(object=>object.lpId===id&&object.lpLiveAnnotation)){editAnnotation(annotationCommand('delete',state.index,id));break;}}
+  syncTools();
+},onFullscreen:()=>$('projectorFullscreen').click()}):null;
+function syncTools(){tools?.update({ready:!!doc&&!!state&&!ended,undo:(ownedMarks.get(state?.index)||[]).some(id=>doc?.slides[state.index]?.objects.some(object=>object.lpId===id&&object.lpLiveAnnotation))});}
+function editAnnotation(command){
+  const next=applyAnnotationCommand(doc,command);if(!next){tools?.status('This mark could not be synced. Try a shorter drawing.');return;}
+  doc=next;link?.send('command',command);render();syncTools();
+}
+function sendDraft(value){
+  clearTimeout(draftTimer);if(!interactive||!link||ended)return;
+  const send=()=>{lastDraft=Date.now();link.send('draft',value?{...value,client:link.id,at:Date.now()}:{client:link.id,clear:true});};
+  if(!value||Date.now()-lastDraft>=33)send();else draftTimer=setTimeout(send,33-(Date.now()-lastDraft));
+}
+function sendLaser(event){
+  clearTimeout(laserSendTimer);if(!interactive||!link||ended)return;
+  const bounds=$('projectorStage').getBoundingClientRect(),value=event?{x:Math.max(0,Math.min(1,(event.clientX-bounds.left)/bounds.width)),y:Math.max(0,Math.min(1,(event.clientY-bounds.top)/bounds.height)),visible:true,at:Date.now()}:{x:0,y:0,visible:false,at:Date.now()};
+  pointer(value);
+  const send=()=>{lastLaserSend=Date.now();link.send('laser',value);};
+  if(!event||Date.now()-lastLaserSend>=33)send();else laserSendTimer=setTimeout(send,33-(Date.now()-lastLaserSend));
+}
+const editor=new SlideEditor($('projectorStage'),{onChange:()=>{},onSelection:()=>{},onHistory:()=>{},onError:error=>{$('projectorStatus').textContent=error;},onPlayback:()=>{},onPresentationDraft:sendDraft});
+editor.liveSession=interactive;
+editor.canvas.on('mouse:down',()=>{drawingGesture=interactive&&editor.drawing;});
+editor.canvas.on('mouse:up',()=>{drawingGesture=false;if(needsRender){needsRender=false;render();}});
+editor.canvas.on('path:created',({path})=>{
+  if(!interactive||!doc||!state||ended||tools.mode!=='pen')return;
+  const index=editor.index;
+  path.lpAnnotationKind='pen';const command=annotationCommand('create',index,path.toObject(['lpId','lpAnnotation','lpLiveAnnotation','lpAnnotationKind']));
+  if(!applyAnnotationCommand(doc,command)){editor.canvas.remove(path);tools.status('This mark could not be synced. Try a shorter drawing.');return;}
+  const ids=ownedMarks.get(index)||[];ids.push(path.lpId);ownedMarks.set(index,ids);editAnnotation(command);
+});
 editor.setMode({readonly:true});
 function restoreCursor(cursor){
   const player=editor.player;if(!player)return;
@@ -40,7 +80,7 @@ function restoreCursor(cursor){
   editor.animationValues=player.values;editor.applyVisibility();editor.syncMedia();
 }
 async function render(){
-  if(rendering){needsRender=true;return;}if(!doc||!state||ended)return;
+  if(rendering||drawingGesture){needsRender=true;return;}if(!doc||!state||ended)return;
   rendering=true;
   try{
     const control=normalizeState(doc,state),current=params.has('inkOverlay')?{...doc,slides:doc.slides.map(slide=>({...slide,objects:slide.objects.filter(object=>!object.lpLiveAnnotation)}))}:doc;
@@ -56,7 +96,7 @@ async function render(){
       if(control.cursor>lastCursor&&editor.player?.cursor===lastCursor)editor.nextAnimation();
       else if(control.cursor!==editor.player?.cursor)restoreCursor(control.cursor);
     }
-    lastCursor=control.cursor;lastEpoch=control.epoch;$('projectorWelcome').hidden=true;editor.resize();renderDrafts();
+    lastCursor=control.cursor;lastEpoch=control.epoch;$('projectorWelcome').hidden=true;editor.resize();renderDrafts();syncTools();
   }catch(error){$('projectorWelcome').hidden=false;$('projectorStatus').textContent=`Slide unavailable: ${error.message}`;}
   finally{rendering=false;if(needsRender){needsRender=false;render();}}
 }
@@ -67,16 +107,16 @@ function pointer(value){
   laserTimer=setTimeout(()=>{dot.hidden=true;},2000);
 }
 function receive(type,value,message){
-  if(message.sender!=='firebase'){local=true;if(cloud){cloud.close();cloud=null;}}
+  if(message.sender!=='firebase'&&message.host===true){local=true;if(cloud){cloud.close();cloud=null;}}
   if(type==='document'){try{validateDocument(value);doc=value;render();}catch(error){$('projectorStatus').textContent=error.message;}}
   if(type==='state'){state=value;render();}
   if(type==='laser')pointer(value);
   if(type==='draft')receiveDraft(value);
-  if(type==='end'){ended=true;editor.stopAnimations();$('projectorBlank').hidden=false;$('projectorLaser').hidden=true;$('projectorWelcome').hidden=false;$('projectorStatus').textContent='Presentation ended.';}
+  if(type==='end'){ended=true;editor.stopAnimations();$('projectorBlank').hidden=false;$('projectorLaser').hidden=true;$('projectorWelcome').hidden=false;$('projectorStatus').textContent='Presentation ended.';syncTools();}
 }
 let link;
 if(validRoomId(room)){
-  link=new LiveLink({room,receive});
+  link=new LiveLink({room,receive,onStatus:(_value,error)=>{if(error){$('projectorConnection').textContent=`Live change not synced: ${error.message}`;tools?.status(`Live change not synced: ${error.message}`);}}});
   watchAccount(user=>{
     $('projectorSignIn').hidden=local||!!user;
     if(user?.email===OWNER_EMAIL&&user.emailVerified)setTimeout(async()=>{
@@ -89,4 +129,11 @@ if(validRoomId(room)){
 $('projectorSignIn').addEventListener('click',()=>login().catch(error=>{$('projectorStatus').textContent=error.message;}));
 $('projectorFullscreen').addEventListener('click',()=>document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen().catch(()=>{$('projectorConnection').textContent='Use your browser’s full-screen control.';}));
 window.addEventListener('resize',()=>{editor.resize();renderDrafts();});
-window.addEventListener('pagehide',()=>{clearInterval(draftExpiry);link?.close();});
+if(interactive){
+  $('projectorStage').addEventListener('pointermove',event=>{if(tools.mode==='laser'&&doc&&state&&!ended)sendLaser(event);});
+  $('projectorStage').addEventListener('pointerleave',()=>{if(tools.mode==='laser')sendLaser(null);});
+  $('projectorStage').addEventListener('click',event=>{if(tools.mode==='laser')event.stopImmediatePropagation();},true);
+  window.addEventListener('blur',()=>{if(tools.mode==='laser')sendLaser(null);});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden){sendDraft(null);if(tools.mode==='laser')sendLaser(null);}});
+}
+window.addEventListener('pagehide',()=>{sendLaser(null);sendDraft(null);clearInterval(draftExpiry);clearTimeout(draftTimer);clearTimeout(laserSendTimer);link?.close();});
