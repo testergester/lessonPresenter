@@ -3,6 +3,8 @@ import {validRoomId,clamp,motionPoint} from './src/live-protocol.js';
 import {connectLiveRoom} from './src/live-cloud.js';
 import {watchAccount,login} from './src/cloud.js';
 import {OWNER_EMAIL} from './src/firebase-config.js';
+import {nextPresentationPreview} from './src/presentation-preview.js';
+import {SlideThumbnail} from './src/slide-thumbnail.js';
 import './src/presenter.css';
 
 const $=id=>document.getElementById(id),params=new URLSearchParams(location.search),room=params.get('room');
@@ -10,6 +12,7 @@ let link=null,cloud=null,state=null,doc=null,mode='touch',point={x:.5,y:.5},orig
 let heartbeat=null,motionTimeout=null;
 const status=text=>{$('remoteStatus').textContent=text;};
 const pad=$('remotePad');
+const thumbnail=new SlideThumbnail($('remoteNextCanvas'),{onLoading:()=>{$('remoteNextEmpty').textContent='Updating preview…';$('remoteNextEmpty').hidden=false;},onReady:()=>{$('remoteNextEmpty').hidden=true;},onError:()=>{$('remoteNextEmpty').textContent='Preview unavailable · tap to advance';$('remoteNextEmpty').hidden=false;}});
 function drawDot(){const dot=$('remoteDot');dot.style.left=(point.x*100)+'%';dot.style.top=(point.y*100)+'%';}
 function sendPointer(visible){
   if(!link||ended)return;
@@ -33,7 +36,16 @@ function receive(type,value,message){
   if(type==='state'){state=value;updateSlide();}
   if(type==='end'){ended=true;hold(false);status('Presentation ended.');document.querySelectorAll('button[data-action],button[data-mode]').forEach(button=>button.disabled=true);}
 }
-function updateSlide(){if(doc&&state){$('remoteSlide').textContent=`${state.index+1} / ${doc.lesson.pages.length}`;document.querySelector('[data-action=blank]').setAttribute('aria-pressed',String(state.blank));if(local)status('Connected to this device');}}
+function updateSlide(){
+  if(!doc||!state)return;
+  $('remoteSlide').textContent=`${state.index+1} / ${doc.lesson.pages.length}`;
+  document.querySelector('[data-action=blank]').setAttribute('aria-pressed',String(state.blank));
+  const preview=nextPresentationPreview(doc,state);
+  $('remoteNextKind').textContent=preview.label;$('remoteNextTitle').textContent=preview.title;
+  $('remoteNext').setAttribute('aria-label',`${preview.label}: ${preview.title}`);
+  $('remoteNext').disabled=ended||preview.kind==='end';thumbnail.update(preview.slide);
+  if(local)status('Connected to this device');
+}
 async function connect(){
   if(!link||cloud||local||ended)return;
   try{
@@ -44,7 +56,7 @@ async function connect(){
 if(validRoomId(room)){
   link=new LiveLink({room,receive});
   const presenter=new URL('studio.html',location.href);presenter.search=location.search;$('remotePresenter').href=presenter.href;
-  const preview=new URL('projector.html',location.href);preview.search=location.search;preview.searchParams.set('preview','1');$('remotePreview').src=preview.href;
+  const preview=new URL('projector.html',location.href);preview.search=location.search;preview.searchParams.set('preview','1');preview.searchParams.set('monitor','1');$('remotePreview').src=preview.href;
   watchAccount(user=>{if(!user){cloud?.close();cloud=null;hostOnline=local;hold(false);$('remoteSignIn').hidden=local;status(local?'Connected to this device':'Sign in with the account presenting this lesson.');}else{ $('remoteSignIn').hidden=true;if(user.email===OWNER_EMAIL&&user.emailVerified)setTimeout(connect,350);else status('Use the project owner’s Google account.');}});
 }else status('Open the phone remote link from your presenter dashboard.');
 $('remoteSignIn').addEventListener('click',()=>login().catch(error=>status(error.message)));
@@ -53,8 +65,9 @@ function setMode(next){
   hold(false);drag=null;mode=next;origin=null;
   document.querySelectorAll('[data-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.mode===mode)));
   document.querySelector('.remote-motion-controls').hidden=mode!=='motion';document.querySelector('.remote-drawing-controls').hidden=mode!=='draw';
-  pad.classList.toggle('remote-pad-drawing',mode==='draw');pad.classList.toggle('remote-pad-motion',mode==='motion');
-  $('remoteHint').textContent={touch:'Hold and move your finger on the pad to point at the slide.',motion:'Calibrate, then hold the button and tilt your phone to point.',draw:'Draw on the pad to annotate the current projected slide.'}[mode];
+  pad.classList.toggle('remote-pad-drawing',mode==='draw');$('remoteMotionHelp').hidden=mode!=='motion';
+  pad.setAttribute('aria-label',mode==='draw'?'Slide drawing pad. Draw over the current slide.':'Slide laser pad. Drag to point; use arrow keys and Space with a keyboard.');
+  $('remoteHint').textContent={touch:'Hold and move your finger over the slide to point.',motion:'Calibrate, then hold the button and tilt to point.',draw:'Draw directly over the slide to annotate it.'}[mode];
 }
 async function enableMotion(){
   try{
@@ -82,7 +95,7 @@ pad.addEventListener('pointerdown',event=>{
   if(mode==='motion'||ended||!hostOnline||!state)return;
   event.preventDefault();pad.setPointerCapture(event.pointerId);const start=position(event);
   drag={id:event.pointerId,start,point:{...point},index:state.index,points:[[start.x,start.y]]};
-  if(mode==='touch')hold(true);else {point=start;drawDot();renderInk();}
+  if(mode==='touch'){point=start;hold(true);}else {point=start;drawDot();renderInk();}
 });
 let draftTimer=null,lastDraft=0;
 function sendDraft(clear=false){
@@ -95,7 +108,7 @@ function renderInk(){
 }
 pad.addEventListener('pointermove',event=>{
   if(!drag||event.pointerId!==drag.id)return;const next=position(event);
-  if(mode==='touch'){point={x:clamp(drag.point.x+next.x-drag.start.x),y:clamp(drag.point.y+next.y-drag.start.y)};sendPointer(true);}
+  if(mode==='touch'){point=next;sendPointer(true);}
   else{if(drag.points.length<1000)drag.points.push([next.x,next.y]);point=next;drawDot();renderInk();}
 });
 function release(event,cancel=false){
@@ -111,4 +124,4 @@ pad.addEventListener('keydown',event=>{
   if(event.code==='Space'){event.preventDefault();hold(true);}
 });pad.addEventListener('keyup',event=>{if(event.code==='Space')hold(false);});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){hold(false);drag=null;}});window.addEventListener('blur',()=>hold(false));
-window.addEventListener('online',connect);window.addEventListener('pagehide',()=>{hold(false);link?.close();});drawDot();
+window.addEventListener('online',connect);window.addEventListener('pagehide',()=>{hold(false);thumbnail.dispose();link?.close();});drawDot();

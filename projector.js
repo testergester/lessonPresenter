@@ -11,6 +11,7 @@ import './src/presenter.css';
 
 const $=id=>document.getElementById(id),params=new URLSearchParams(location.search),room=params.get('room');
 if(params.has('preview'))document.body.classList.add('projector-preview');
+if(params.has('monitor'))document.body.classList.add('projector-monitor');
 let doc=null,state=null,rendering=false,needsRender=false,sceneKey=null,lastCursor=0,lastEpoch=0,ended=false,cloud=null,local=false,laserTimer=null;
 const drafts=new Map();
 function renderDrafts(){
@@ -43,7 +44,7 @@ async function render(){
   rendering=true;
   try{
     const current=doc,control=normalizeState(current,state),scene=JSON.stringify(current.slides[control.index]),changed=sceneKey!==scene||editor.index!==control.index||lastEpoch!==control.epoch;
-    $('projectorBlank').hidden=!control.blank;
+    $('projectorBlank').hidden=params.has('monitor')||!control.blank;
     if(changed){
       editor.setLesson(current.slides);await editor.show(control.index,control.reveal);sceneKey=scene;
       // Keep automatic opening effects playing; late joiners receive the final
