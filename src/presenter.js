@@ -6,6 +6,7 @@ import {applyAnnotationCommand} from './live-annotations.js';
 import {watchAccount} from './cloud.js';
 import {OWNER_EMAIL} from './firebase-config.js';
 import {connectLiveRoom,watchLiveRooms} from './live-cloud.js';
+import {createRemoteConnect} from './remote-connect.js';
 import './presenter.css';
 
 export function setupPresenter(api){
@@ -13,11 +14,12 @@ export function setupPresenter(api){
   let room=null,link=null,state=null,original=null,doc=null,digest=null,user=null,cloud=null,projector=null,applying=false,frame=null,stopRooms=null,connecting=false,generation=0;
   let host=false,dirty=false,hasDocument=false,nextAllowedAt=0;
   const panel=document.createElement('section');panel.className='presenter-panel';panel.hidden=true;
-  panel.innerHTML=`<div class="presenter-heading"><div><strong>Presenter dashboard</strong><span data-status role="status">Local session</span></div><button type="button" data-end>End presentation</button></div>
+  panel.innerHTML=`<div class="presenter-heading"><div><strong>Presenter dashboard</strong><span data-status role="status">Local session</span></div><div class="presenter-heading-actions"><button type="button" data-collapse aria-expanded="true" aria-controls="presenterPanelContent">Hide controls ↑</button><button type="button" data-end>End presentation</button></div></div><div id="presenterPanelContent">
     <div class="presenter-controls"><button type="button" data-action="previous" aria-label="Previous slide or hide answer">←</button><span data-slide></span><button type="button" data-action="next">Next →</button><button type="button" data-action="reveal">Reveal answer</button><button type="button" data-action="hide">Hide answers</button><button type="button" data-action="restart">Replay effects</button><button type="button" data-action="blank" aria-pressed="false">Blank screen</button><button type="button" data-projector>Projector window ↗</button><button type="button" data-remote>Phone remote</button><button type="button" data-links>Device links</button><button type="button" data-retry hidden>Retry device sync</button></div>
     <div class="presenter-links" hidden><p>Open a device link and sign in with the same owner account.</p><label>Presenter dashboard<input data-presenter-link readonly aria-label="Presenter dashboard link" /></label><label>Phone remote<input data-remote-link readonly aria-label="Phone remote link" /></label><button type="button" data-copy>Copy remote link</button></div>
-    <div class="presenter-details"><p>Use the editing tools, slide list and teacher notes below. Changes apply to this live session; your saved lesson stays unchanged.</p><details><summary>Projector preview</summary><iframe title="Live projector preview" data-preview></iframe></details></div>`;
+    <div class="presenter-details"><p>Use the editing tools, slide list and teacher notes below. Changes apply to this live session; your saved lesson stays unchanged.</p><details><summary>Projector preview</summary><iframe title="Live projector preview" data-preview></iframe></details></div></div>`;
   (document.querySelector('.app-header')).after(panel);
+  const remoteConnect=createRemoteConnect();
   const lobby=document.createElement('section');lobby.className='presenter-lobby';
   lobby.innerHTML='<h3>Live presenter</h3><p>Present in a separate window, edit live, or join from another device.</p><label>Active presentation<select aria-label="Active presentation"><option value="">Choose a live session</option></select></label><button type="button" data-join>Join presenter</button><button type="button" data-join-remote>Use phone remote</button><p data-lobby-status>Sign in to find live presentations on your other devices.</p>';
   (document.querySelector('.studio-teaching')||document.querySelector('.teaching-sidebar')).append(lobby);
@@ -26,7 +28,7 @@ export function setupPresenter(api){
   function links(){
     if(!room)return;
     panel.querySelector('[data-presenter-link]').value=url('studio.html').href;
-    panel.querySelector('[data-remote-link]').value=url('remote.html').href;
+    const remote=url('remote.html').href;panel.querySelector('[data-remote-link]').value=remote;remoteConnect.update(remote);
   }
   function showState(){
     if(!state||!doc)return;
@@ -97,6 +99,7 @@ export function setupPresenter(api){
   }
   async function end(broadcast=true){
     if(!room)return;
+    remoteConnect.close();
     if(host&&broadcast)link.send('end',{});
     generation++;cancelAnimationFrame(frame);frame=null;room=null;
     const previous=link;link=cloud=null;connecting=false;previous.close();
@@ -147,7 +150,11 @@ export function setupPresenter(api){
   panel.addEventListener('click',event=>{const button=event.target.closest('[data-action]');if(button)command({action:button.dataset.action});});
   panel.querySelector('[data-end]').addEventListener('click',()=>end());
   panel.querySelector('[data-projector]').addEventListener('click',openProjector);
-  panel.querySelector('[data-remote]').addEventListener('click',()=>{const address=url('remote.html');if(matchMedia('(max-width:680px)').matches)location.href=address.href;else{panel.querySelector('.presenter-links').hidden=false;panel.querySelector('[data-remote-link]').focus();panel.querySelector('[data-remote-link]').select();}});
+  panel.querySelector('[data-remote]').addEventListener('click',()=>{links();remoteConnect.open(url('remote.html').href);});
+  panel.querySelector('[data-collapse]').addEventListener('click',()=>{
+    const content=panel.querySelector('#presenterPanelContent'),button=panel.querySelector('[data-collapse]');content.hidden=!content.hidden;
+    panel.classList.toggle('presenter-panel-collapsed',content.hidden);button.setAttribute('aria-expanded',String(!content.hidden));button.textContent=content.hidden?'Show controls ↓':'Hide controls ↑';
+  });
   panel.querySelector('[data-links]').addEventListener('click',()=>{const node=panel.querySelector('.presenter-links');node.hidden=!node.hidden;});
   panel.querySelector('[data-retry]').addEventListener('click',()=>{if(cloud)cloud.retry().catch(error=>onStatus('error',error));else attach();});
   panel.querySelector('[data-copy]').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(url('remote.html').href);api.status('Phone remote link copied.');}catch{panel.querySelector('[data-remote-link]').select();api.status('Select and copy the phone remote link.');}});
@@ -168,7 +175,7 @@ export function setupPresenter(api){
   const online=()=>{if(room&&!cloud)attach();};window.addEventListener('online',online);
   document.addEventListener('studio:update',changed);
   document.addEventListener('keydown',event=>{
-    if(!room||event.target.closest('input,textarea,[contenteditable]')||document.querySelector('dialog[open]'))return;
+    if(!room||event.target.closest('button,a,input,select,textarea,summary,[contenteditable]')||document.querySelector('dialog[open]'))return;
     if(event.key==='ArrowRight'||event.code==='Space'){event.preventDefault();event.stopImmediatePropagation();command({action:'next'});}
     if(event.key==='ArrowLeft'){event.preventDefault();event.stopImmediatePropagation();command({action:'previous'});}
   },true);
